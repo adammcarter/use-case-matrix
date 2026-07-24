@@ -6,6 +6,7 @@
     "name": "Use Cases"
   },
   "skills": ["./.agents/skills/"],
+  "agents": ["./agents/"],
   "mcpServers": {
     "use-cases": {
       "command": "node",

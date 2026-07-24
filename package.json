@@ -20,6 +20,7 @@
   },
   "files": [
     ".agents/skills",
+    "agents",
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     ".codex-plugin/plugin.json",

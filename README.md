@@ -44,6 +44,15 @@ You already track behaviour *somewhere* — a markdown table, a checklist, a CSV
 ### 🔌 Works inside your agent
 Ships for **Claude Code, Codex, Copilot, and OpenCode** as a CLI (`uc`) and an MCP server, with the same JSON contract on both. On install it auto-injects a trusted bootstrap at session start, so the agent knows how to use it without being told.
 
+### 🤖 Three agents that do the work
+Dispatch them by name; each owns one part of the loop and hands off to the next.
+
+| Agent | Does |
+|---|---|
+| `use-cases-updater` | Keeps the matrix true against the code — binds, verifies, drives every row back to `VERIFIED_LOCAL`. |
+| `use-cases-demo-prep` | Stages a demo: picks the rows, rehearses every step off-stage against the real product, hands back ready-to-post cards. Records nothing. |
+| `use-cases-demo` | Performs that demo live and records the evidence. A plan is never a demo. |
+
 ---
 
 ## Who it's for
