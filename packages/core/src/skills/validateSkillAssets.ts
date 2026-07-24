@@ -10,6 +10,7 @@ import type {
   SkillHostRegistrationSummary
 } from "./types.js";
 import { CANONICAL_SKILLS } from "./canonicalSkills.js";
+import { KNOWN_CLI_COMMANDS, KNOWN_FLAT_CLI_COMMANDS } from "../cli/knownCommands.js";
 
 const BOOTSTRAP_SECTIONS = [
   "When to apply",
@@ -19,51 +20,6 @@ const BOOTSTRAP_SECTIONS = [
   "Core commands",
   "Never claim"
 ] as const;
-const KNOWN_CLI_COMMANDS = new Set([
-  "capsule list",
-  "capsule plan",
-  "capsule validate",
-  "doctor roots",
-  "doctor skills",
-  "evidence record",
-  "evidence status",
-  "evidence void",
-  "matrix list",
-  "matrix remove",
-  "matrix status",
-  "matrix upsert",
-  "matrix validate",
-  "plan showcase",
-  "plan walkthrough",
-  "showcase approve",
-  "showcase correct",
-  "showcase decide",
-  "showcase finish",
-  "showcase pause",
-  "showcase record-observation",
-  "showcase record-verdict",
-  "showcase reject",
-  "showcase resume",
-  "showcase start",
-  "showcase status",
-  "workflow mode",
-  "workflow set-mode"
-]);
-// Flat, single-segment commands (no subcommand) shipped by the marker / keyless
-// tier. A reference like `uc bind --repo ...` has a flag as its second token, so
-// it is validated by its bare command name, not a `command subcommand` pair.
-const KNOWN_FLAT_CLI_COMMANDS = new Set([
-  "init",
-  "bind",
-  "scan",
-  "verify",
-  "recover",
-  "keygen",
-  "prove",
-  "validate-ledger",
-  // F3 out-of-band human signer, referenced by the showcase skill's demo gates.
-  "approve-run"
-]);
 const FORBIDDEN_PATTERNS: Array<{ code: string; pattern: RegExp; message: string }> = [
   {
     code: "skills.mandatory_showcase_claim",

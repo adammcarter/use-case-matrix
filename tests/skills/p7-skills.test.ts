@@ -4,6 +4,12 @@ import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { parseYamlToJson } from "../../packages/core/src/schema/index.js";
 import { CANONICAL_SKILLS } from "../../packages/core/src/skills/canonicalSkills.js";
+// One shared allowlist, parity-tested against the CLI registry — never a second
+// hand-maintained copy of the command list.
+import {
+  KNOWN_CLI_COMMANDS as knownCliCommands,
+  KNOWN_FLAT_CLI_COMMANDS as knownFlatCliCommands
+} from "../../packages/core/src/cli/knownCommands.js";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 const skillRoot = join(repoRoot, ".agents", "skills");
@@ -11,50 +17,6 @@ const skillRoot = join(repoRoot, ".agents", "skills");
 // and skill validation (which both read CANONICAL_SKILLS) cover every shipped
 // skill — including `migration`, which host projection once silently dropped.
 const canonicalSkillNames = [...CANONICAL_SKILLS];
-const knownCliCommands = new Set([
-  "capsule list",
-  "capsule plan",
-  "capsule validate",
-  "doctor roots",
-  "doctor skills",
-  "evidence record",
-  "evidence status",
-  "evidence void",
-  "matrix list",
-  "matrix remove",
-  "matrix status",
-  "matrix upsert",
-  "matrix validate",
-  "plan showcase",
-  "plan walkthrough",
-  "showcase approve",
-  "showcase correct",
-  "showcase decide",
-  "showcase finish",
-  "showcase pause",
-  "showcase record-observation",
-  "showcase record-verdict",
-  "showcase reject",
-  "showcase resume",
-  "showcase start",
-  "showcase status",
-  "workflow mode",
-  "workflow set-mode"
-]);
-// Flat, single-segment marker / keyless-tier commands. A reference like
-// `uc bind --repo ...` carries a flag as its second token, so it is validated by
-// its bare command name (mirrors validateSkillAssets.KNOWN_FLAT_CLI_COMMANDS).
-const knownFlatCliCommands = new Set([
-  "init",
-  "bind",
-  "scan",
-  "verify",
-  "recover",
-  "keygen",
-  "prove",
-  "validate-ledger",
-  "approve-run"
-]);
 
 describe("P7 canonical skills and activation bootstrap", () => {
   test("every canonical skill has valid frontmatter and a matching directory name", () => {
