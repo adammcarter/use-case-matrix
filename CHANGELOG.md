@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format is based on
 follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
 **pre-1.0 (beta) software**: anything MAY change before `1.0.0`.
 
+## Unreleased
+
+### Added
+
+- **The plugin ships three agents.** `use-cases-updater`, `use-cases-demo-prep`,
+  and `use-cases-demo` now install with the plugin instead of each user
+  rebuilding them, declared via `agents` in the Claude plugin manifest and the
+  published package files list. They are one loop: keep the matrix true against
+  the code, stage a demo from it, perform that demo and record the evidence.
+- **`use-cases-demo-prep` is new.** It rehearses every step off-stage against
+  the real product and hands back ready-to-post demo cards whose `Expect` is
+  written from output it actually saw, so the presenting agent runs the live
+  showcase writing no code and making no decisions. It is barred from every
+  `uc showcase` recording command — a rehearsal nobody watched is not a demo.
+  (`CANONICAL_AGENTS`, `agents.roster.*` rows.)
+
+### Fixed
+
+- **The skill/agent command allowlist no longer drifts from the CLI.** It was a
+  hand-maintained copy, duplicated again in its test, and had fallen behind:
+  `uc impact` and `uc showcase request-approval` both ship, and both would have
+  been reported as unknown commands — the validator flagging correct prose. One
+  source now lives in `packages/core/src/cli/knownCommands.ts`, with a parity
+  test asserting it equals what the CLI registry actually dispatches.
+
 ## 0.5.4 - 2026-07-23
 
 ### Changed
