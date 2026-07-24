@@ -32,11 +32,13 @@ function frontmatterOf(source: string): { name?: unknown; description?: unknown 
 }
 
 describe("canonical agents", () => {
+//: @use-case:agents.roster.shipped_with_plugin
   test("the agents directory holds exactly the canonical agents", () => {
     expect(existsSync(agentRoot)).toBe(true);
     const files = readdirSync(agentRoot).filter((entry) => entry.endsWith(".md")).sort();
     expect(files).toEqual([...canonicalAgentNames].map((name) => `${name}.md`).sort());
   });
+//: @use-case:end agents.roster.shipped_with_plugin
 
   test.each(canonicalAgentNames)("%s has frontmatter whose name matches its filename", (name) => {
     const frontmatter = frontmatterOf(readAgent(name));
@@ -71,6 +73,7 @@ describe("canonical agents", () => {
     expect(unknown).toEqual([]);
   });
 
+//: @use-case:agents.roster.bodies_hold_the_line#bodies
   test.each(canonicalAgentNames)("%s never authorises an agent to claim the user's approval", (name) => {
     const source = readAgent(name);
     expect(source).not.toMatch(/agents?\s+may\s+(claim|record)\s+(user approval|user sign-off)/i);
@@ -83,6 +86,7 @@ describe("canonical agents", () => {
     // Agent bodies ship to everyone who installs the plugin. A reference to the
     // author's own machine, roster, or sibling repo is meaningless to them.
     expect(source).not.toMatch(/agent-setup|~\/\.claude|\/Users\//);
+//: @use-case:end agents.roster.bodies_hold_the_line#bodies
   });
 
   test("the Claude plugin manifest declares the agents directory", () => {

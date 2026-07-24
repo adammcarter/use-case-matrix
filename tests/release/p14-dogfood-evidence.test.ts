@@ -22,6 +22,9 @@ describe("P14 v1 release dogfood evidence", () => {
 
     expect(listed.status).toBe(0);
     expect((listed.payload.data.use_cases as Array<{ id: string }>).map((item) => item.id)).toEqual([
+      "agents.roster.bodies_hold_the_line",
+      "agents.roster.command_allowlist_tracks_cli",
+      "agents.roster.shipped_with_plugin",
       "capsule.demos.adhoc_release_demo",
       "capsule.demos.persisted_smoke_runbook",
       "capsule.demos.runbook_not_proof",
