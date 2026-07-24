@@ -14,6 +14,7 @@ import {
 // unknown. This test makes the copy impossible to drift: the sets must equal what
 // the registry actually dispatches, plus the bespoke builtins that never entered
 // it (version / init / help live in builtins.ts by design).
+//: @use-case:agents.roster.command_allowlist_tracks_cli
 describe("known CLI command sets track the real registry", () => {
   const registryPaths = allCommands.map((command) => command.path);
   const registryFlat = registryPaths.filter((path) => path.length === 1).map((path) => path[0]);
@@ -33,3 +34,4 @@ describe("known CLI command sets track the real registry", () => {
     expect(KNOWN_CLI_COMMANDS.has("showcase request-approval")).toBe(true);
   });
 });
+//: @use-case:end agents.roster.command_allowlist_tracks_cli

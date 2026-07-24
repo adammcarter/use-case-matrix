@@ -1,0 +1,179 @@
+schema_version: 1
+feature:
+  id: agents.roster
+  name: Shipped agents
+  summary: Ship the three use-case agents (updater, demo-prep, demo) with the plugin so every install gets the same loop — keep the matrix true, stage a demo, perform it — instead of each user rebuilding them privately.
+use_cases:
+  - id: agents.roster.shipped_with_plugin
+    title: Installing the plugin installs its three agents
+    lifecycle: active
+    value_tier: core
+    journey_role: golden
+    usage_frequency: common
+    tags:
+      - agents
+      - packaging
+      - hosts
+    source_refs:
+      - kind: file
+        path: packages/core/src/agents/canonicalAgents.ts
+      - kind: file
+        path: agents/use-cases-updater.md
+      - kind: file
+        path: agents/use-cases-demo-prep.md
+      - kind: file
+        path: agents/use-cases-demo.md
+      - kind: file
+        path: .claude-plugin/plugin.json
+      - kind: file
+        path: package.json
+    actor: script
+    intent: Confirm the agents directory holds exactly the canonical roster, and that both the Claude plugin manifest and the published package actually ship it.
+    preconditions:
+      - The plugin declares a canonical agent roster in CANONICAL_AGENTS.
+    trigger: A release or install gate checks the plugin's shipped surfaces.
+    scenarios:
+      - id: agents.roster.shipped_with_plugin.declared
+        kind: steps
+        steps:
+          - Read the agents directory and compare it to CANONICAL_AGENTS.
+          - Confirm the Claude plugin manifest declares ./agents.
+          - Confirm the published package files list includes agents.
+    observable_outcomes:
+      - An agent added to the roster without a body, or shipped without being declared, fails the gate.
+      - A user installing the plugin can dispatch all three agents by name.
+    host_applicability:
+      - host_surface: claude.cli
+        supported: true
+    verification_policy:
+      mode: requirements
+      verifiers:
+        script:
+          kind: script
+          evidence_kind: test_result
+          command:
+            - pnpm
+            - -s
+            - vitest
+            - run
+            - tests/agents/canonical-agents.test.ts
+          inputs:
+            - tests/agents/canonical-agents.test.ts
+            - packages/core/src/agents/canonicalAgents.ts
+      requirements:
+        - evidence_kind: test_result
+          required_verifiers:
+            - script
+          minimum_count: 1
+    approval_policy:
+      mode: none
+  - id: agents.roster.bodies_hold_the_line
+    title: An agent body cannot claim approval or cite a command that does not exist
+    lifecycle: active
+    value_tier: critical
+    journey_role: edge
+    usage_frequency: occasional
+    tags:
+      - agents
+      - trust
+      - diagnostics
+    source_refs:
+      - kind: file
+        path: tests/agents/canonical-agents.test.ts
+      - kind: file
+        path: packages/core/src/cli/knownCommands.ts
+    actor: script
+    intent: Hold every shipped agent body to the same rules the skills obey — parseable frontmatter, only real CLI commands, no authority to claim the user's approval, and no reference to one author's private setup.
+    preconditions:
+      - The plugin ships agent bodies that instruct other agents.
+    trigger: A change to any shipped agent body, or to the CLI command surface it cites.
+    scenarios:
+      - id: agents.roster.bodies_hold_the_line.forbidden
+        kind: steps
+        steps:
+          - Parse each agent's YAML frontmatter and check its name matches the filename.
+          - Extract every `uc` command the body cites and check it against the shared allowlist.
+          - Check the body claims no user approval and names no private roster or home path.
+    observable_outcomes:
+      - A body that sends the reader to a command the CLI does not ship fails the gate.
+      - A body that authorises an agent to claim the user's sign-off fails the gate.
+    host_applicability:
+      - host_surface: claude.cli
+        supported: true
+    verification_policy:
+      mode: requirements
+      verifiers:
+        script:
+          kind: script
+          evidence_kind: test_result
+          command:
+            - pnpm
+            - -s
+            - vitest
+            - run
+            - tests/agents/canonical-agents.test.ts
+          inputs:
+            - tests/agents/canonical-agents.test.ts
+            - agents/use-cases-demo.md
+      requirements:
+        - evidence_kind: test_result
+          required_verifiers:
+            - script
+          minimum_count: 1
+    approval_policy:
+      mode: none
+  - id: agents.roster.command_allowlist_tracks_cli
+    title: The command allowlist cannot drift from the real CLI
+    lifecycle: active
+    value_tier: supporting
+    journey_role: edge
+    usage_frequency: rare
+    tags:
+      - agents
+      - skills
+      - cli
+    source_refs:
+      - kind: file
+        path: packages/core/src/cli/knownCommands.ts
+      - kind: file
+        path: packages/cli/src/command/registry.ts
+    actor: script
+    intent: Guarantee the allowlist used to validate skill and agent prose equals what the CLI registry actually dispatches, so a correct body is never flagged and a fictional command is never waved through.
+    preconditions:
+      - Skill and agent bodies are validated against a shared command allowlist.
+    trigger: A command is added to or removed from the CLI registry.
+    scenarios:
+      - id: agents.roster.command_allowlist_tracks_cli.parity
+        kind: steps
+        steps:
+          - Derive every dispatchable command path from the CLI registry.
+          - Compare it against the shared allowlist, plus the bespoke builtins.
+          - Confirm `impact` and `showcase request-approval` — the two that had drifted — are allowed.
+    observable_outcomes:
+      - Adding a registry command without the allowlist fails the gate.
+      - A skill or agent citing a real command is never reported as unknown.
+    host_applicability:
+      - host_surface: claude.cli
+        supported: true
+    verification_policy:
+      mode: requirements
+      verifiers:
+        script:
+          kind: script
+          evidence_kind: test_result
+          command:
+            - pnpm
+            - -s
+            - vitest
+            - run
+            - tests/cli/known-commands-parity.test.ts
+          inputs:
+            - tests/cli/known-commands-parity.test.ts
+            - packages/core/src/cli/knownCommands.ts
+      requirements:
+        - evidence_kind: test_result
+          required_verifiers:
+            - script
+          minimum_count: 1
+    approval_policy:
+      mode: none
