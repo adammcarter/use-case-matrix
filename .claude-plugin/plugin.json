@@ -5,12 +5,20 @@
   "author": {
     "name": "Use Cases"
   },
-  "skills": ["./.agents/skills/"],
-  "agents": ["./agents/"],
+  "skills": [
+    "./.agents/skills/"
+  ],
+  "agents": [
+    "./agents/use-cases-updater.md",
+    "./agents/use-cases-demo.md",
+    "./agents/use-cases-demo-prep.md"
+  ],
   "mcpServers": {
     "use-cases": {
       "command": "node",
-      "args": ["./packages/mcp/dist/index.js"]
+      "args": [
+        "./packages/mcp/dist/index.js"
+      ]
     }
   }
 }
