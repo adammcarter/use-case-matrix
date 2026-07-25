@@ -89,12 +89,21 @@ describe("canonical agents", () => {
 //: @use-case:end agents.roster.bodies_hold_the_line#bodies
   });
 
-  test("the Claude plugin manifest declares the agents directory", () => {
+  // The installer rejects a DIRECTORY here ("agents: Invalid input") and takes the
+  // whole plugin down with it — every skill, hook and MCP server included. It shows
+  // up only as "1 error during load", so the plugin silently stays uninstalled.
+  // `skills` next to it DOES take a directory, which is what made this easy to miss.
+  test("the Claude plugin manifest declares each agent as a file path", () => {
     const manifest = JSON.parse(readFileSync(join(repoRoot, ".claude-plugin", "plugin.json"), "utf8")) as {
       agents?: unknown;
     };
     expect(Array.isArray(manifest.agents)).toBe(true);
-    expect((manifest.agents as string[]).map((entry) => entry.replace(/\/$/, ""))).toContain("./agents");
+    const entries = manifest.agents as string[];
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      expect(entry.endsWith(".md")).toBe(true);
+      expect(existsSync(join(repoRoot, entry))).toBe(true);
+    }
   });
 
   test("the published package ships the agents directory", () => {
