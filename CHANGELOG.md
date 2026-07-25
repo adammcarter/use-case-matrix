@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format is based on
 follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
 **pre-1.0 (beta) software**: anything MAY change before `1.0.0`.
 
+## 0.5.6 - 2026-07-25
+
+- **The three agents actually install now.** `agents` in the Claude plugin
+  manifest takes explicit file paths; 0.5.5 declared a directory, which the
+  installer rejects outright — so the whole plugin failed validation and nothing
+  it ships loaded. The neighbouring `skills` field does take a directory, which is
+  why the mismatch was easy to miss. Verified with `claude plugin validate` and a
+  real install, not by inspection.
+
 ## 0.5.5 - 2026-07-25
 
 ### Added
