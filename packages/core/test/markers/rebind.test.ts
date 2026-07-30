@@ -6,7 +6,7 @@
 // slug could be registered exactly once, so a review that FOUND such a row had
 // nothing it could do about it — `bind` refused with DUPLICATE_REGISTRATION, and
 // removing the markers from source did not release the registration.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -515,5 +515,146 @@ describe("a moved binding does not carry its proof", () => {
     });
     expect(released.exit_code).toBe(0);
     expect(localStatus(ws)).not.toBe("VERIFIED_LOCAL");
+  });
+});
+
+// Paths the new commands support but nothing exercised end to end yet. The exec
+// bit in particular: `bind` regressed on exactly this once (an atomic rewrite
+// dropping 100755 to 100644 on a bound hook), so the two commands that rewrite
+// the same way get the same guard.
+describe("moving one binding does not disturb its neighbours", () => {
+  const TWO_FUNCS = `import Foundation
+
+public func first() -> Int {
+    return 1
+}
+
+public func second() -> Int {
+    return 2
+}
+
+public func third() -> Int {
+    return 3
+}
+`;
+
+  function bindWithSuffix(ws: Workspace, suffix: string, line: number) {
+    return runBindCommand({
+      context: ws.context,
+      productRoot: ws.productRoot,
+      bindingsPath: ws.bindingsPath,
+      rowId: ROW_ID,
+      suffix,
+      file: SOURCE_PATH,
+      mode: "swift-func",
+      line,
+      clock,
+      idFactory
+    });
+  }
+
+  test("a row with two suffixed bindings moves only the one named", () => {
+    const ws = makeWorkspace({ [SOURCE_PATH]: TWO_FUNCS });
+    expect(bindWithSuffix(ws, "alpha", 3).exit_code).toBe(0);
+    // The alpha marker shifted everything below it down one line.
+    expect(bindWithSuffix(ws, "beta", 8).exit_code).toBe(0);
+    expect(markerLines(source(ws))).toHaveLength(2);
+
+    const moved = runRebindCommand({
+      context: ws.context,
+      productRoot: ws.productRoot,
+      bindingsPath: ws.bindingsPath,
+      rowId: ROW_ID,
+      suffix: "alpha",
+      file: SOURCE_PATH,
+      mode: "swift-func",
+      line: 12, // third(), counted with the alpha marker gone and beta's still in
+      clock,
+      idFactory
+    });
+
+    expect(moved.errors).toEqual([]);
+    expect(moved.binding_slug).toBe(`${ROW_ID}#alpha`);
+    // Both bindings still exist, and beta never moved.
+    const lines = source(ws).split("\n");
+    expect(markerLines(source(ws))).toHaveLength(2);
+    expect(lines.findIndex((l) => l.includes(`${ROW_ID}#beta`))).toBe(6);
+    expect(lines[7]).toContain("second()");
+    expect(scan(ws).status.integrity_errors).toEqual([]);
+  });
+
+  test("releasing one suffixed binding leaves the other registered", () => {
+    const ws = makeWorkspace({ [SOURCE_PATH]: TWO_FUNCS });
+    bindWithSuffix(ws, "alpha", 3);
+    bindWithSuffix(ws, "beta", 8);
+
+    const released = runUnbindCommand({
+      context: ws.context,
+      productRoot: ws.productRoot,
+      bindingsPath: ws.bindingsPath,
+      rowId: ROW_ID,
+      suffix: "alpha",
+      clock,
+      idFactory
+    });
+
+    expect(released.exit_code).toBe(0);
+    const validated = validateBindingsJsonl(bindingsText(ws), new Set([ROW_ID]));
+    expect(validated.errors).toEqual([]);
+    expect([...(validated.registry.rowToSlugs.get(ROW_ID) ?? [])]).toEqual([`${ROW_ID}#beta`]);
+    expect(markerLines(source(ws))).toHaveLength(1);
+    expect(scan(ws).status.integrity_errors).toEqual([]);
+  });
+
+  test.each([
+    ["rebind", "rebind"],
+    ["unbind", "unbind"]
+  ])("%s keeps a bound script executable", (command) => {
+    const HOOK = "hooks/session-start";
+    const ws = makeWorkspace({ [HOOK]: "#!/bin/sh\necho one\necho two\necho three\n" });
+    const hookAbs = join(ws.productRoot, HOOK);
+    chmodSync(hookAbs, 0o755);
+    expect(
+      runBindCommand({
+        context: ws.context,
+        productRoot: ws.productRoot,
+        bindingsPath: ws.bindingsPath,
+        rowId: ROW_ID,
+        file: HOOK,
+        mode: "explicit",
+        startLine: 2,
+        endLine: 2,
+        clock,
+        idFactory
+      }).exit_code
+    ).toBe(0);
+    expect(statSync(hookAbs).mode & 0o111).not.toBe(0);
+
+    const result =
+      command === "rebind"
+        ? runRebindCommand({
+            context: ws.context,
+            productRoot: ws.productRoot,
+            bindingsPath: ws.bindingsPath,
+            rowId: ROW_ID,
+            file: HOOK,
+            mode: "explicit",
+            startLine: 3,
+            endLine: 4,
+            clock,
+            idFactory
+          })
+        : runUnbindCommand({
+            context: ws.context,
+            productRoot: ws.productRoot,
+            bindingsPath: ws.bindingsPath,
+            rowId: ROW_ID,
+            clock,
+            idFactory
+          });
+
+    expect(result.exit_code).toBe(0);
+    // 100755 survives the atomic temp+rename, as it must for a bound hook.
+    expect(statSync(hookAbs).mode & 0o111).not.toBe(0);
   });
 });

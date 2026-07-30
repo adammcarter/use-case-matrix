@@ -7,6 +7,27 @@ follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
 
 ## Unreleased
 
+### Upgrade note
+
+- **A workspace that has used `rebind` or `unbind` needs this version everywhere.**
+  The binding ledger gained a `binding_released` event, and older `uc` versions
+  reject any event type they do not know: they exit 4 with
+  `REGISTRY_SCHEMA_INVALID` on a ledger that has been through either command.
+  They fail *closed* — an older `uc` reads nothing it misunderstands and writes
+  nothing at all, so a straggler cannot corrupt the ledger — but in a repo with
+  mixed versions the older ones stop working on that workspace. Upgrade CI and
+  every developer together, or hold off on `rebind` / `unbind` until you have.
+  A staggered rollout is safe right up to that first command.
+
+  Nothing else moves. An existing project that upgrades and carries on as before
+  sees no difference at all, and that is enforced rather than asserted: 1295 JSON
+  key paths across the 16-step daily loop, captured from the real published 0.5.5
+  binary, are asserted unchanged on every build
+  (`tests/release/upgrade-contract-0.5.5.test.ts`), and a rehearsal on a
+  0.5.5-built project confirms a signed `FRESH` row stays `FRESH` with every row,
+  binding-set, and policy hash bit-identical across the upgrade. Full detail and
+  the rollback path: [docs/migration/upgrading-to-0.6.0.md](docs/migration/upgrading-to-0.6.0.md).
+
 ### Added
 
 - **A binding can be re-pointed.** `uc rebind` moves a binding to a different

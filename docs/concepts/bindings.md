@@ -77,6 +77,14 @@ the ledger is never rewritten, so append-only survives. Two commands write one:
 Both take `--suffix` (when a row binds several spans), `--reason` (recorded on
 the event), and `--dry-run`.
 
+**Version floor.** A `binding_released` event is only understood from the version
+that introduced these commands. An older `uc` exits 4 with
+`REGISTRY_SCHEMA_INVALID` on a ledger that has been through `rebind` or `unbind` —
+it fails closed and writes nothing, so it cannot corrupt anything, but it cannot
+work in that workspace either. Upgrade CI and the whole team together before
+using either command. The reverse direction is safe: a current `uc` reads every
+older ledger unchanged.
+
 Why this exists: `bind` will not register a slug that is already registered, and
 removing a marker by hand does **not** release its registration. Without a way to
 end one, a marker on the wrong declaration was permanent — and a marker on the

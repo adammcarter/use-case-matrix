@@ -28,6 +28,9 @@ Ships as a single package, `use-cases`, providing the `uc` CLI and the
 - **[TEST-MATRIX migration](./migration.md)** — importing an existing
   `TEST-MATRIX.md` into the matrix (behaviour coverage is preserved; proof is
   not).
+- **[Upgrading to 0.6.0](./migration/upgrading-to-0.6.0.md)** — what the new
+  binding-ledger event means for an existing project, and when a workspace
+  starts requiring 0.6.0 everywhere.
 - Runnable examples live under [`examples/`](../examples) — including
   [`examples/python-pytest`](../examples/python-pytest), a pure-Python project
   that reaches a signed **FRESH** row with `pytest` and no pnpm/vitest.
