@@ -20,6 +20,8 @@ import {
   resolveContextOrError,
   runBindCommand,
   runImpactCommand,
+  runRebindCommand,
+  runUnbindCommand,
   runProveCommand,
   runScanCommand,
   runValidateLedgerCommand,
@@ -222,6 +224,108 @@ export const markersBindCommand: CliCommand = {
       version: getVersionInfo().version
     });
     return markerOutput("markers.bind", result, ctx, result.exit_code === 0);
+  }
+};
+
+// The other half of bind. `bind` places a marker and registers it; these two end
+// that registration (unbind) or move it (rebind). Without them a binding on the
+// wrong declaration is permanent through the tool: bind refuses the slug on the
+// way back in, and removing the marker by hand does not release the registration.
+export const markersUnbindCommand: CliCommand = {
+  path: ["unbind"],
+  command: "markers.unbind",
+  summary: "Release a binding: remove its marker from the source and end its registration.",
+  flags: [
+    ...workspaceFlags,
+    ...markerPathFlags,
+    { key: "row", name: "--row", kind: "string", valueName: "<id>", summary: "Row id to release." },
+    { key: "suffix", name: "--suffix", kind: "string", valueName: "<s>", summary: "Suffix of the binding to release (when a row has more than one)." },
+    { key: "reason", name: "--reason", kind: "string", valueName: "<s>", summary: "Why the binding ended (recorded on the release event; default `unbind`)." },
+    { key: "dryRun", name: "--dry-run", kind: "boolean", summary: "Report what would be released without writing the source or registry." }
+  ],
+  handler: ({ argv, flags }) => {
+    const context = resolveContextOrError(argv, "markers.unbind");
+    if (context.kind === "error") {
+      return { envelope: context.envelope, exitCode: context.exitCode };
+    }
+    const ctx = context.context;
+    const rowId = flags.row as string | undefined;
+    if (!rowId) {
+      return {
+        envelope: errorEnvelope("markers.unbind", "cli_invalid_arguments", "Missing --row."),
+        exitCode: 2
+      };
+    }
+    const paths = markerPaths(flags, ctx);
+    const result = runUnbindCommand({
+      context: ctx,
+      productRoot: paths.productRoot,
+      bindingsPath: paths.bindingsPath,
+      rowId,
+      suffix: flags.suffix as string | undefined,
+      reason: flags.reason as string | undefined,
+      dryRun: flags.dryRun as boolean,
+      clock: () => new Date().toISOString(),
+      idFactory: generateUlid,
+      version: getVersionInfo().version
+    });
+    return markerOutput("markers.unbind", result, ctx, result.exit_code === 0);
+  }
+};
+
+export const markersRebindCommand: CliCommand = {
+  path: ["rebind"],
+  command: "markers.rebind",
+  summary: "Move a binding to a different declaration (marker and registration together).",
+  flags: [
+    ...workspaceFlags,
+    ...markerPathFlags,
+    { key: "row", name: "--row", kind: "string", valueName: "<id>", summary: "Row id whose binding moves." },
+    { key: "file", name: "--file", kind: "string", valueName: "<path>", summary: "Source file the marker moves TO (may differ from where it is now)." },
+    { key: "mode", name: "--mode", kind: "string", valueName: "<mode>", summary: "explicit | swift-func." },
+    { key: "startLine", name: "--start-line", kind: "integer", valueName: "<n>", summary: "Span start line (REQUIRED for --mode explicit)." },
+    { key: "endLine", name: "--end-line", kind: "integer", valueName: "<n>", summary: "Span end line (REQUIRED for --mode explicit)." },
+    { key: "line", name: "--line", kind: "integer", valueName: "<n>", summary: "Function line (REQUIRED for --mode swift-func). Count lines as the file will read once the OLD marker is gone." },
+    { key: "suffix", name: "--suffix", kind: "string", valueName: "<s>", summary: "Suffix of the binding to move (when a row has more than one)." },
+    { key: "reason", name: "--reason", kind: "string", valueName: "<s>", summary: "Why the binding moved (recorded on both events; default `rebind`)." },
+    { key: "commentPrefix", name: "--comment-prefix", kind: "string", valueName: "<s>", summary: "Override the line-comment prefix (else inferred from extension/shebang)." },
+    { key: "dryRun", name: "--dry-run", kind: "boolean", summary: "Preview the move without writing the source or registry." }
+  ],
+  handler: ({ argv, flags }) => {
+    const context = resolveContextOrError(argv, "markers.rebind");
+    if (context.kind === "error") {
+      return { envelope: context.envelope, exitCode: context.exitCode };
+    }
+    const ctx = context.context;
+    const rowId = flags.row as string | undefined;
+    const file = flags.file as string | undefined;
+    const modeRaw = flags.mode as string | undefined;
+    if (!rowId || !file || (modeRaw !== "explicit" && modeRaw !== "swift-func")) {
+      return {
+        envelope: errorEnvelope("markers.rebind", "cli_invalid_arguments", "Missing --row, --file, or --mode (explicit|swift-func)."),
+        exitCode: 2
+      };
+    }
+    const paths = markerPaths(flags, ctx);
+    const result = runRebindCommand({
+      context: ctx,
+      productRoot: paths.productRoot,
+      bindingsPath: paths.bindingsPath,
+      rowId,
+      suffix: flags.suffix as string | undefined,
+      file,
+      mode: modeRaw,
+      line: flags.line as number | undefined,
+      startLine: flags.startLine as number | undefined,
+      endLine: flags.endLine as number | undefined,
+      reason: flags.reason as string | undefined,
+      commentPrefix: flags.commentPrefix as string | undefined,
+      dryRun: flags.dryRun as boolean,
+      clock: () => new Date().toISOString(),
+      idFactory: generateUlid,
+      version: getVersionInfo().version
+    });
+    return markerOutput("markers.rebind", result, ctx, result.exit_code === 0);
   }
 };
 
@@ -549,6 +653,8 @@ export const markersValidateLedgerCommand: CliCommand = {
 
 export const markersCommands: CliCommand[] = [
   markersBindCommand,
+  markersUnbindCommand,
+  markersRebindCommand,
   markersScanCommand,
   markersImpactCommand,
   markersProveCommand,

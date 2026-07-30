@@ -128,6 +128,11 @@ const REGISTRY = {
     "Binding slug conflicts with an existing registry row.",
     "UCM_REGISTRY_SLUG_ROW_CONFLICT"
   ),
+  UCM_REGISTRY_RELEASE_WITHOUT_REGISTRATION: entry(
+    "registry",
+    "Binding release names a slug that is not currently registered.",
+    "UCM_REGISTRY_RELEASE_WITHOUT_REGISTRATION"
+  ),
 
   // --- evidence ledger (surface: evidence) --------------------------------
   UCM_EVIDENCE_JSON_PARSE: entry(
@@ -449,7 +454,8 @@ export const LEGACY_ENUM_CODE_MAP: {
     SLUG_PREFIX_MISMATCH: "UCM_REGISTRY_SLUG_PREFIX_MISMATCH",
     REGISTRY_ROW_MISSING: "UCM_REGISTRY_ROW_MISSING",
     DUPLICATE_REGISTRATION: "UCM_REGISTRY_DUPLICATE_REGISTRATION",
-    SLUG_ROW_CONFLICT: "UCM_REGISTRY_SLUG_ROW_CONFLICT"
+    SLUG_ROW_CONFLICT: "UCM_REGISTRY_SLUG_ROW_CONFLICT",
+    RELEASE_WITHOUT_REGISTRATION: "UCM_REGISTRY_RELEASE_WITHOUT_REGISTRATION"
   }),
   evidence: Object.freeze({
     JSON_PARSE_ERROR: "UCM_EVIDENCE_JSON_PARSE",

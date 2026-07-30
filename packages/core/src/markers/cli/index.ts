@@ -7,6 +7,10 @@ export * from "./io.js";
 export * from "./shared.js";
 export * from "./scan.js";
 export * from "./bind.js";
+// Ending and re-pointing a binding: the other half of `bind`.
+export * from "./bindingLifecycle.js";
+export * from "./unbind.js";
+export * from "./rebind.js";
 export * from "./prove.js";
 export * from "./verify.js";
 // 0.2.0 F2: advisory, read-only change-impact map (`uc impact`).

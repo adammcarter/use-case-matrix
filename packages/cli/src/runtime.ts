@@ -43,6 +43,8 @@ export const {
   validateSkillAssets,
   inspectPackageArtifact,
   runBindCommand,
+  runUnbindCommand,
+  runRebindCommand,
   runScanCommand,
   runProveCommand,
   runVerifyCommand,

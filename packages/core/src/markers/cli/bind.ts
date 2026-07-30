@@ -10,8 +10,7 @@ import {
   resolveCommentPrefix,
   type CommentPrefixConfig
 } from "../commentPrefix.js";
-import { BINDING_REGISTRY_SCHEMA_ID } from "../constants.js";
-import { UCM_VERSION } from "../../version.js";
+import { bindingRegisteredEvent, insertMarkerLines } from "./bindingLifecycle.js";
 import { isValidSlug } from "../markerLine.js";
 import { validateBindingsJsonl } from "../registry.js";
 import {
@@ -149,9 +148,15 @@ export function runBindCommand(options: BindCommandOptions): BindCommandResult {
     });
   }
   if (registryValidation.registry.slugToRow.has(bindingSlug)) {
+    // Naming the way out matters more here than anywhere else: this refusal is
+    // what a wrongly-placed binding hits on the way back in, and without the
+    // hint it reads as "this row can never be corrected".
     return fail(base, 4, {
       code: "DUPLICATE_REGISTRATION",
-      message: `binding slug ${bindingSlug} is already registered`
+      message:
+        `binding slug ${bindingSlug} is already registered; ` +
+        `re-point it with \`uc rebind --row ${options.rowId} --file <file> --mode <mode>\` ` +
+        `or release it with \`uc unbind --row ${options.rowId}\``
     });
   }
 
@@ -162,7 +167,12 @@ export function runBindCommand(options: BindCommandOptions): BindCommandResult {
   if (options.registerExisting) {
     nextContents = current;
   } else {
-    const edit = insertMarker(current, commentPrefix, bindingSlug, options);
+    const edit = insertMarkerLines(current, commentPrefix, bindingSlug, {
+      mode: options.mode,
+      line: options.line,
+      startLine: options.startLine,
+      endLine: options.endLine
+    });
     if ("error" in edit) {
       return fail(base, 2, edit.error);
     }
@@ -209,20 +219,15 @@ export function runBindCommand(options: BindCommandOptions): BindCommandResult {
     // shell script / hook must not drop its executable bit (100755 -> 100644).
     fs.writeText(absFile, nextContents, { preserveMode: true });
   }
-  const event = {
-    schema: BINDING_REGISTRY_SCHEMA_ID,
-    event_type: "binding_registered",
-    event_id: options.idFactory(),
-    created_at: options.clock(),
-    created_by: {
-      tool: "use-cases",
-      command: "bind",
-      version: options.version ?? UCM_VERSION
-    },
-    row_id: options.rowId,
-    binding_slug: bindingSlug,
-    reason: options.registerExisting ? "register_existing" : "initial_bind"
-  };
+  const event = bindingRegisteredEvent({
+    command: "bind",
+    rowId: options.rowId,
+    bindingSlug,
+    reason: options.registerExisting ? "register_existing" : "initial_bind",
+    eventId: options.idFactory(),
+    createdAt: options.clock(),
+    version: options.version
+  });
   appendJsonlLine(fs, options.bindingsPath, JSON.stringify(event));
 
   return {
@@ -236,61 +241,3 @@ export function runBindCommand(options: BindCommandOptions): BindCommandResult {
   };
 }
 //: @use-case:end lifecycle.signals.bind_names_the_next_step
-
-type InsertResult = { contents: string } | { error: BindCommandError };
-
-function insertMarker(
-  source: string,
-  commentPrefix: string,
-  slug: string,
-  options: BindCommandOptions
-): InsertResult {
-  const { lines, terminator } = splitKeepingTerminator(source);
-  const marker = `${commentPrefix}: @use-case:${slug}`;
-
-  if (options.mode === "swift-func") {
-    if (options.line === undefined || options.line < 1) {
-      return { error: { code: "BIND_LINE_REQUIRED", message: "--line is required for swift-func bind" } };
-    }
-    const insertAt = options.line - 1;
-    if (insertAt > lines.length) {
-      return { error: { code: "BIND_LINE_OUT_OF_RANGE", message: `--line ${options.line} is past end of file` } };
-    }
-    lines.splice(insertAt, 0, marker);
-    return { contents: joinWithTerminator(lines, terminator) };
-  }
-
-  // explicit
-  if (options.startLine === undefined || options.endLine === undefined) {
-    return { error: { code: "BIND_SPAN_REQUIRED", message: "--start-line and --end-line are required for explicit bind" } };
-  }
-  if (options.startLine < 1 || options.endLine < options.startLine || options.endLine > lines.length) {
-    return {
-      error: {
-        code: "BIND_SPAN_OUT_OF_RANGE",
-        message: `explicit span ${options.startLine}-${options.endLine} is out of range`
-      }
-    };
-  }
-  const endMarker = `${commentPrefix}: @use-case:end ${slug}`;
-  // Insert end first (higher index) so the start insertion does not shift it.
-  lines.splice(options.endLine, 0, endMarker);
-  lines.splice(options.startLine - 1, 0, marker);
-  return { contents: joinWithTerminator(lines, terminator) };
-}
-
-// Split into logical lines, remembering whether the file ended with a newline so
-// a marker insertion does not silently add/remove the trailing terminator.
-function splitKeepingTerminator(source: string): { lines: string[]; terminator: boolean } {
-  if (source === "") {
-    return { lines: [], terminator: false };
-  }
-  const terminator = source.endsWith("\n");
-  const body = terminator ? source.slice(0, -1) : source;
-  return { lines: body.split("\n"), terminator };
-}
-
-function joinWithTerminator(lines: string[], terminator: boolean): string {
-  const joined = lines.join("\n");
-  return terminator ? `${joined}\n` : joined;
-}
