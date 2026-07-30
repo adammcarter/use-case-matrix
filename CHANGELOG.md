@@ -5,6 +5,44 @@ All notable changes to this project are documented here. The format is based on
 follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
 **pre-1.0 (beta) software**: anything MAY change before `1.0.0`.
 
+## Unreleased
+
+### Added
+
+- **A binding can be re-pointed.** `uc rebind` moves a binding to a different
+  declaration — in the same file or another one — marker and registration
+  together, so the row is never registered to nothing in between. `uc unbind`
+  ends a binding outright, which is the exit path for a retired behaviour and the
+  first step when a row is renamed or deleted from the matrix.
+
+  Until now `bind` was the only command that wrote a binding, and a slug could be
+  registered exactly once, forever: `bind` refused it on the way back in with
+  `DUPLICATE_REGISTRATION`, and removing the marker by hand did not release the
+  registration. That made a marker on the wrong declaration permanent through the
+  tool — the worst row a matrix can hold, because it reads as proven while the
+  code it points at cannot fail when the claim does. Finding those is the point
+  of reviewing a matrix; a review that found one had nothing to do about it.
+
+  Under both commands is a new `binding_released` event, appended like every
+  other, so the ledger is still never rewritten. A moved binding does **not**
+  carry its proof: the row reads `STALE_LOCAL` until `uc verify` runs again.
+
+### Fixed
+
+- **Retiring or renaming a bound row is no longer terminal.** A row that left the
+  matrix while bound put the whole workspace at `REGISTRY_ROW_MISSING`, exit 4,
+  with no supported way back. The row-existence rule now runs over the live
+  binding set, so releasing the binding clears it. A slug still bound to a row
+  the matrix no longer has is unchanged — still an error.
+- **Integrity remediations stopped recommending a hand-edit.** Every
+  `REGISTRY_ROW_MISSING` / `UNREGISTERED_BINDING` cure told the reader to delete a
+  line from `.use-cases/bindings.jsonl` — the same shortcut the tool refuses
+  everywhere else, and only ever advised because nothing could end a registration.
+  They now name `uc unbind`.
+- **Rename detection no longer refuses to guess about a row it is certain of.** A
+  lost row can reach the inference by two routes at once, and two copies of one
+  candidate tripped the "ambiguous, say nothing" tie-break.
+
 ## 0.5.6 - 2026-07-25
 
 - **The three agents actually install now.** `agents` in the Claude plugin

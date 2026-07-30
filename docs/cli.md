@@ -60,6 +60,21 @@ signing key must be a PKCS8 ed25519 PEM — see
   opening marker shifts the file's line numbers down by one, so a later `scan`
   reports the span one line below the `--start-line`/`--end-line` you passed —
   that is expected, not drift.
+- `uc rebind --row <id> --file <path> --mode explicit|swift-func … [--reason <s>] [--dry-run] [--json]`:
+  move a binding to a different declaration, in this file or another one. The
+  marker and its registration move together in one step, so the row is never
+  registered to nothing in between; a target that cannot resolve to a span aborts
+  with the source and the ledger untouched. Count `--line` /
+  `--start-line`/`--end-line` as the file will read once the OLD marker is gone.
+  The row drops to `STALE_LOCAL` after the move — a moved binding is a different
+  claim, so `uc verify --row <id>` has to run again.
+- `uc unbind --row <id> [--suffix <s>] [--reason <s>] [--dry-run] [--json]`:
+  end a binding — remove its marker from the source and release its registration,
+  freeing the slug to be bound again. This is the exit path for a retired
+  behaviour, and the first step when a row is renamed or deleted from the matrix
+  (`uc unbind --row <old>` then `uc bind --row <new> --register-existing`). Its
+  preconditions are deliberately weaker than `bind`'s: the row may already be
+  gone from the matrix, and the marker may already be gone from the source.
 - `uc scan [--repo <path>] [--public-key <pem>] [--keyring <path>] [--gate] [--policy-mode <mode>] [--json]`:
   derive each row's freshness — `FRESH` / `SUSPECT` / `UNPROVEN` / `UNBOUND` /
   `INVALID` — from the current code, the binding registry, and the proof ledger.

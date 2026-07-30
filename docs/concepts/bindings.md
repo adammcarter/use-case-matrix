@@ -37,6 +37,12 @@ export function applyDiscount(total: number, percent: number): number { … }
             uc bind                 edit code / test            uc prove (CI)
  author ───────────────▶ registered ──────────────▶ status ◀──────────────── proof
  marker                  (bindings.jsonl)            via scan                  events
+                              │  ▲
+                    uc unbind │  │ uc bind
+                   (released) │  │
+                              ▼  │
+                          ── uc rebind ──
+                       (released + re-registered)
 ```
 
 1. **Place** the marker in source.
@@ -53,6 +59,45 @@ export function applyDiscount(total: number, percent: number): number { … }
 `--suffix`, `--register-existing` (register a marker you already placed without
 editing source), `--comment-prefix` (override the inferred prefix), and
 `--dry-run`.
+
+## Ending or moving a binding
+
+A registration ends with a `binding_released` event, appended like every other —
+the ledger is never rewritten, so append-only survives. Two commands write one:
+
+- **`uc rebind --row <id> --file <f> --mode <m> …`** moves a binding to a
+  different declaration, in the same file or another one. The marker moves and
+  the registration moves with it, in one step, so the row is never registered to
+  nothing in between. A target that cannot resolve to a span aborts with the
+  source and the ledger untouched, exactly as `bind` does.
+- **`uc unbind --row <id>`** ends a binding outright: the marker comes out of the
+  source and the registration is released. Use it when a behaviour is retired,
+  or when a row is renamed or deleted from the matrix.
+
+Both take `--suffix` (when a row binds several spans), `--reason` (recorded on
+the event), and `--dry-run`.
+
+Why this exists: `bind` will not register a slug that is already registered, and
+removing a marker by hand does **not** release its registration. Without a way to
+end one, a marker on the wrong declaration was permanent — and a marker on the
+wrong declaration is the worst row in a matrix, because it reads as proven while
+the code it points at cannot fail when the claim does.
+
+**Counting lines for `rebind`.** `--line` / `--start-line` / `--end-line` describe
+the file as it will read once the OLD marker is gone. When the binding moves
+within one file, count from the marker-free version.
+
+**A moved binding does not carry its proof.** The row's binding set changed, so
+its old verification no longer applies: after a rebind the row reads
+`STALE_LOCAL` until `uc verify --row <id>` runs again. That is deliberate — the
+alternative would be a way to move a verified status onto code nobody verified.
+
+**Renamed a row?** Release the old id first, then register the new one:
+
+```sh
+uc unbind --row old.row.id --reason row_renamed
+uc bind --row new.row.id --file <file> --register-existing
+```
 
 ## The five freshness states
 

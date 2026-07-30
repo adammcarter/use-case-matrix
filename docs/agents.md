@@ -71,8 +71,31 @@ the new state. It **never fakes green**: if the verifier genuinely fails it exit
 non-zero with a diagnostic naming the failing row(s). Fix the code or the test,
 then re-run — do not paper over a real failure.
 
-If the binding moved because the code was edited or relocated, re-bind first so the
-marker tracks the new span, then `recover`.
+`recover` re-verifies a binding; it does not re-point one. If the marker is on the
+wrong declaration — or the code it named moved somewhere else — move the binding
+first, then recover:
+
+```sh
+uc rebind --repo <repo> --row <row-id> --file <file> --mode swift-func --line <n>
+uc recover --repo <repo> --row <row-id>
+```
+
+Count the line numbers as the file will read once the OLD marker is gone. To end a
+binding instead of moving it (a retired behaviour, or a row leaving the matrix),
+use `uc unbind --row <row-id> --reason <why>`.
+
+## Running `uc` from a dispatched worker
+
+`uc` needs its own directory **and** `node` on `PATH`. A sandboxed agent dispatch
+typically runs with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, which has neither, so the
+worker fails with a bare `command not found: uc` — the shell's message, before
+`uc` runs at all, so there is nothing the tool can say to explain itself.
+
+Keep acceptance verification with the orchestrator. It owns the evidence and the
+final claim anyway, and a worker that cannot run `uc` cannot produce either. If a
+worker genuinely must run `uc`, pass through the directories holding `uc` and
+`node` explicitly (`command -v uc`, `command -v node`) rather than discovering the
+gap a whole dispatch later.
 
 ## When to prove (the opt-in upgrade)
 
