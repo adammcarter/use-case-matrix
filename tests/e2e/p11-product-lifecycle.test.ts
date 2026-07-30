@@ -271,7 +271,7 @@ describe("P11 host and project acceptance", () => {
       complete: true,
       data: {
         counts: {
-          use_cases_addressable: 105
+          use_cases_addressable: 108
         }
       }
     });
@@ -279,7 +279,7 @@ describe("P11 host and project acceptance", () => {
     const listed = runCliJson(["matrix", "list", "--repo", repoRoot, "--json"]);
     expect(listed.status).toBe(0);
     const ids = (listed.payload.data.use_cases as Array<{ id: string }>).map((item) => item.id);
-    expect(ids).toHaveLength(105);
+    expect(ids).toHaveLength(108);
     expect(ids).toEqual(expect.arrayContaining([
       "capsule.live_runner.scripted",
       "matrix.core.validate",
