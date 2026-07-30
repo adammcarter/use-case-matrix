@@ -124,11 +124,13 @@ describe("integrity errors are visible and carry a cure", () => {
 
     const out = uc(dir, "scan", "--repo", dir).stdout;
 
-    // The registry is append-only with NO retract event, and `uc bind` validates the
-    // registry first — so it fails CLOSED on this very error. Advice that omits this
-    // sends the reader in a circle.
-    expect(out).toContain(".use-cases/bindings.jsonl");
+    // `uc bind` validates the registry first, so it fails CLOSED on this very
+    // error: the old registration has to END before the new id can be registered.
+    // The cure names the command that ends it — never a hand-edit of the ledger,
+    // which is the same shortcut the tool refuses everywhere else.
+    expect(out).toContain(`uc unbind --row ${ROW_ID}`);
     expect(out).toContain("--register-existing");
+    expect(out).not.toContain("Delete the");
   });
 
   test("and that remediation actually works, end to end", () => {
@@ -137,13 +139,13 @@ describe("integrity errors are visible and carry a cure", () => {
     renameRow(dir);
 
     const renamed = "example.checkout.apply_discount_code";
-    const registry = join(dir, ".use-cases/bindings.jsonl");
 
-    // Step 1, exactly as the remediation instructs: drop the stale registration.
-    const kept = readFileSync(registry, "utf8")
-      .split("\n")
-      .filter((line) => line.trim() !== "" && !line.includes(ROW_ID));
-    writeFileSync(registry, kept.length === 0 ? "" : `${kept.join("\n")}\n`);
+    // Step 1, exactly as the remediation instructs: release the stale
+    // registration. The marker in the source already carries the NEW id, so
+    // there is nothing for unbind to remove — only the registration ends.
+    const released = uc(dir, "unbind", "--repo", dir, "--row", ROW_ID,
+      "--reason", "row_renamed", "--json");
+    expect(released.status).toBe(0);
 
     // Step 2: re-register the new id.
     const rebind = uc(dir, "bind", "--repo", dir, "--row", renamed, "--file", "src/coupon.py",

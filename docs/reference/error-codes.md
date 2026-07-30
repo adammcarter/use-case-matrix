@@ -9,7 +9,7 @@ code below is a versioned contract: a code is only removed or repurposed in a
 **major** release; new codes ship additively in a **minor**. Diagnostics carry
 the code in their `code` field.
 
-There are **67** codes across **9** surfaces.
+There are **68** codes across **9** surfaces.
 
 ## Marker grammar
 
@@ -31,6 +31,7 @@ There are **67** codes across **9** surfaces.
 |---|---|---|
 | `UCM_REGISTRY_DUPLICATE_REGISTRATION` | error | Duplicate registration in the binding registry. |
 | `UCM_REGISTRY_JSON_PARSE` | error | Binding registry is not valid JSON. |
+| `UCM_REGISTRY_RELEASE_WITHOUT_REGISTRATION` | error | Binding release names a slug that is not currently registered. |
 | `UCM_REGISTRY_ROW_MISSING` | error | Referenced registry row is missing. |
 | `UCM_REGISTRY_SCHEMA_INVALID` | error | Binding registry does not match its schema. |
 | `UCM_REGISTRY_SLUG_PREFIX_MISMATCH` | error | Binding slug prefix does not match the registry. |

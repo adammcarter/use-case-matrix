@@ -70,8 +70,10 @@ export const KNOWN_FLAT_CLI_COMMANDS = new Set([
   "init",
   "keygen",
   "prove",
+  "rebind",
   "recover",
   "scan",
+  "unbind",
   "validate-ledger",
   "verify",
   "version"

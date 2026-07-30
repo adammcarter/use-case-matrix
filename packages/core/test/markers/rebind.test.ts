@@ -16,7 +16,9 @@ import {
   runRebindCommand,
   runScanCommand,
   runUnbindCommand,
-  validateBindingsJsonl
+  runVerifyCommand,
+  validateBindingsJsonl,
+  type VerifySpawnRunner
 } from "../../src/markers/index.js";
 
 const ROW_ID = "checkout.apply_coupon";
@@ -66,9 +68,15 @@ use_cases:
         supported: true
     verification_policy:
       mode: requirements
+      verifiers:
+        contract_check:
+          kind: script
+          evidence_kind: test_result
+          command: [echo, contract-ok]
+          inputs: []
       requirements:
         - evidence_kind: test_result
-          required_verifiers: [script]
+          required_verifiers: [contract_check]
           minimum_count: 1
     approval_policy:
       mode: predefined
@@ -175,6 +183,33 @@ function bindingsText(ws: Workspace): string {
 
 function markerLines(text: string): string[] {
   return text.split("\n").filter((line) => line.includes("@use-case:"));
+}
+
+const passSpawn: VerifySpawnRunner = () => ({
+  exit_code: 0,
+  timed_out: false,
+  stdout: "ok\n",
+  stderr: ""
+});
+
+function verify(ws: Workspace) {
+  return runVerifyCommand({
+    context: ws.context,
+    productRoot: ws.productRoot,
+    bindingsPath: ws.bindingsPath,
+    evidencePath: ws.evidencePath,
+    publicKeyResolver: () => undefined,
+    trustedKeyConfigured: false,
+    generatedAt: GENERATED_AT,
+    rowId: ROW_ID,
+    spawnRunner: passSpawn,
+    outPath: join(ws.context.data_root, ".use-cases", "verification-results.jsonl")
+  });
+}
+
+function localStatus(ws: Workspace): string | undefined {
+  const row = scan(ws).status.rows.find((entry) => entry.row_id === ROW_ID);
+  return row?.local_status ?? undefined;
 }
 
 // The reason codes scan reports for one row (BINDING_REMOVED and friends).
@@ -425,5 +460,60 @@ describe("uc rebind: moving a binding to the right declaration", () => {
     expect(bindingsText(ws)).toBe(before.ledger);
     // Still bound where it was, so nothing is lost by a failed rebind.
     expect(scan(ws).status.integrity_errors).toEqual([]);
+  });
+});
+
+// The property that makes re-pointing safe to offer at all. A binding that moves
+// is a DIFFERENT claim about the code, so the proof of the old one must not
+// travel with it — otherwise `rebind` would be a way to launder a verified status
+// onto code nobody has verified, which is worse than the dead end it replaces.
+describe("a moved binding does not carry its proof", () => {
+  test("VERIFIED_LOCAL does not survive a rebind, and re-verifying restores it", () => {
+    const ws = makeWorkspace({ [SOURCE_PATH]: SOURCE });
+    expect(bindWrongDeclaration(ws).exit_code).toBe(0);
+    expect(verify(ws).exit_code).toBe(0);
+    expect(localStatus(ws)).toBe("VERIFIED_LOCAL");
+
+    const moved = runRebindCommand({
+      context: ws.context,
+      productRoot: ws.productRoot,
+      bindingsPath: ws.bindingsPath,
+      rowId: ROW_ID,
+      file: SOURCE_PATH,
+      mode: "swift-func",
+      line: 7,
+      clock,
+      idFactory
+    });
+    expect(moved.exit_code).toBe(0);
+
+    // The row is no longer locally verified: the binding set it was verified
+    // against does not exist any more.
+    // STALE_LOCAL, not VERIFIED_LOCAL: the row is visibly out of date, not silently fine.
+    expect(localStatus(ws)).toBe("STALE_LOCAL");
+    expect(moved.next_command).toBe(`uc verify --row ${ROW_ID}`);
+
+    // ...and the keyless loop puts it back, now proving the RIGHT declaration.
+    expect(verify(ws).exit_code).toBe(0);
+    expect(localStatus(ws)).toBe("VERIFIED_LOCAL");
+    expect(scan(ws).status.integrity_errors).toEqual([]);
+  });
+
+  test("unbind leaves nothing behind claiming the row is verified", () => {
+    const ws = makeWorkspace({ [SOURCE_PATH]: SOURCE });
+    bindWrongDeclaration(ws);
+    verify(ws);
+    expect(localStatus(ws)).toBe("VERIFIED_LOCAL");
+
+    const released = runUnbindCommand({
+      context: ws.context,
+      productRoot: ws.productRoot,
+      bindingsPath: ws.bindingsPath,
+      rowId: ROW_ID,
+      clock,
+      idFactory
+    });
+    expect(released.exit_code).toBe(0);
+    expect(localStatus(ws)).not.toBe("VERIFIED_LOCAL");
   });
 });

@@ -295,8 +295,14 @@ function inferRenames(
     return result;
   }
 
+  // The same lost row can arrive by both routes below (its registration is live
+  // AND its marker is gone), and two copies of one candidate are not an ambiguous
+  // rename — they are one candidate counted twice. Dedupe before scoring, or the
+  // tie-break below refuses to guess about a row it is certain of.
+  const candidates = [...new Map(missing.map((entry) => [entry.row_id, entry])).values()];
+
   for (const detection of unregistered) {
-    const scored = missing
+    const scored = candidates
       .map((candidate) => ({
         rowId: candidate.row_id,
         score: similarity(detection.row_id, candidate.row_id)
@@ -720,20 +726,20 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
     }
     if (error.code === "REGISTRY_ROW_MISSING") {
       const newRowId = error.row_id ? renamedTo.get(error.row_id) : undefined;
-      // Tell the truth about the cure. The registry is append-only and has NO
-      // retract event, so the stale registration cannot be superseded — and
-      // `uc bind` validates the registry first, so it fails closed on this very
-      // error. The only sequence that actually works today is: drop the stale
-      // line, then re-register. Verified end-to-end; do not "simplify" this to a
-      // bare `uc bind`, which cannot succeed while this error stands.
+      // Tell the truth about the cure. `uc bind` validates the registry first, so
+      // it fails closed on this very error — the stale registration has to END
+      // before anything can be re-registered. `uc unbind` is what ends it; do NOT
+      // send the reader back to hand-editing .use-cases/bindings.jsonl, which is
+      // the same shortcut the tool refuses everywhere else.
       error.remediation = newRowId
-        ? `looks like ${error.row_id} was renamed to ${newRowId}. The binding registry is ` +
-          `append-only with no retract event, so \`uc bind\` will fail closed until the stale ` +
-          `registration is gone: delete the ${error.row_id} line from .use-cases/bindings.jsonl, ` +
-          `then run \`uc bind --row ${newRowId} --file <file> --register-existing\``
+        ? `looks like ${error.row_id} was renamed to ${newRowId}. \`uc bind\` fails closed while ` +
+          `the stale registration stands, so release it first: run ` +
+          `\`uc unbind --row ${error.row_id} --reason row_renamed\`, then ` +
+          `\`uc bind --row ${newRowId} --file <file> --register-existing\``
         : `the registry still binds ${error.row_id ?? "a row"}, which no longer exists in the ` +
-          `matrix. Restore the row to the matrix, or delete its line from ` +
-          `.use-cases/bindings.jsonl and re-register the binding against the row that replaced it`;
+          `matrix. Restore the row to the matrix, or release the stale registration with ` +
+          `\`uc unbind --row ${error.row_id ?? "<row>"}\` and re-register the binding against ` +
+          `the row that replaced it`;
     } else if (error.code === "LEDGER_INTEGRITY_ERROR") {
       error.remediation =
         "inspect the ledger with `uc validate-ledger` — a proof/binding ledger entry is malformed or out of order";
@@ -830,9 +836,9 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
         line: detection.start_line,
         message: `current marker ${detection.binding_slug} is not registered in the binding registry`,
         remediation: previousId
-          ? `looks like ${rowId} was renamed from ${previousId}. Delete the ${previousId} line ` +
-            `from .use-cases/bindings.jsonl (the registry is append-only and cannot retract it, ` +
-            `so bind fails closed until it is gone), then run ` +
+          ? `looks like ${rowId} was renamed from ${previousId}. Release the old registration ` +
+            `first — bind fails closed while it stands — with ` +
+            `\`uc unbind --row ${previousId} --reason row_renamed\`, then run ` +
             `\`uc bind --row ${rowId} --file ${detection.file_path} --register-existing\``
           : `register the marker already in the source with ` +
             `\`uc bind --row ${rowId} --file ${detection.file_path} --register-existing\`` +
@@ -853,7 +859,8 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
         message: `row ${rowId} is bound or registered but is not a known use-case row`,
         remediation: previousId
           ? `looks like ${previousId} was renamed to ${rowId} — add the renamed row to the ` +
-            `matrix (or rename it back), then re-register with ` +
+            `matrix (or rename it back), release the old registration with ` +
+            `\`uc unbind --row ${previousId} --reason row_renamed\`, then re-register with ` +
             `\`uc bind --row ${rowId} --file <file> --register-existing\``
           : `add the row to the matrix, or — if the row id was RENAMED — update the ` +
             `\`@use-case:\` marker(s) in source to the new id and re-register with ` +
