@@ -134,6 +134,111 @@ describe("registry validator (spec 4.3)", () => {
   });
 });
 
+// A binding_released event: the log's way of saying a registration ENDED. Without
+// it a slug is registered forever, so a binding on the wrong declaration can never
+// be re-pointed and a retired row can never be let go (DUPLICATE_REGISTRATION /
+// REGISTRY_ROW_MISSING with no way out).
+function release(
+  binding_slug: string,
+  row_id: string,
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    ...event(binding_slug, row_id),
+    event_type: "binding_released",
+    created_by: { tool: "use-cases", command: "unbind", version: "0.1.0" },
+    reason: "rebind",
+    ...overrides
+  };
+}
+
+describe("binding release (ending a registration)", () => {
+  test("a release drops the slug from both materialized maps", () => {
+    const text = jsonl(
+      event("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+      release("checkout.apply_coupon#tax", "checkout.apply_coupon")
+    );
+    const result = validateBindingsJsonl(text, YAML_ROWS);
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.registry.slugToRow.has("checkout.apply_coupon#tax")).toBe(false);
+    expect([...(result.registry.rowToSlugs.get("checkout.apply_coupon") ?? [])]).toEqual([]);
+  });
+
+  test("re-registering a released slug is clean (the re-point path)", () => {
+    const text = jsonl(
+      event("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+      release("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+      event("checkout.apply_coupon#tax", "checkout.apply_coupon", { reason: "rebind" })
+    );
+    const result = validateBindingsJsonl(text, YAML_ROWS);
+    expect(result.errors).toEqual([]);
+    expect(result.registry.slugToRow.get("checkout.apply_coupon#tax")).toBe(
+      "checkout.apply_coupon"
+    );
+  });
+
+  // Releasing something that is not currently bound is a lie about the log's
+  // state, so it fails rather than being silently absorbed.
+  test.each([
+    ["never registered", jsonl(release("checkout.apply_coupon#tax", "checkout.apply_coupon"))],
+    [
+      "already released",
+      jsonl(
+        event("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+        release("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+        release("checkout.apply_coupon#tax", "checkout.apply_coupon")
+      )
+    ]
+  ])("releasing a slug that is %s fails (RELEASE_WITHOUT_REGISTRATION)", (_label, text) => {
+    const result = validateBindingsJsonl(text, YAML_ROWS);
+    expect(result.ok).toBe(false);
+    expect(result.errors.map((e) => e.code)).toContain(
+      RegistryErrorCode.RELEASE_WITHOUT_REGISTRATION
+    );
+  });
+
+  // The retire / rename exit path: once the binding is released, the row it named
+  // is allowed to leave the matrix. A LIVE registration for a missing row is still
+  // REGISTRY_ROW_MISSING (covered above) — only the released one is forgiven.
+  test("a released slug whose row has left the matrix validates clean", () => {
+    const text = jsonl(
+      event("checkout.retired#tax", "checkout.retired"),
+      release("checkout.retired#tax", "checkout.retired", { reason: "row_retired" })
+    );
+    const result = validateBindingsJsonl(text, YAML_ROWS);
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.registry.rowToSlugs.has("checkout.retired")).toBe(false);
+  });
+
+  test("materializeRegistry folds releases, not just registrations", () => {
+    const text = jsonl(
+      event("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+      event("checkout.apply_coupon#fee", "checkout.apply_coupon"),
+      release("checkout.apply_coupon#tax", "checkout.apply_coupon")
+    );
+    const { events } = validateBindingsJsonl(text, YAML_ROWS);
+    const registry = materializeRegistry(events);
+    expect([...(registry.rowToSlugs.get("checkout.apply_coupon") ?? [])]).toEqual([
+      "checkout.apply_coupon#fee"
+    ]);
+    expect(registry.slugToRow.has("checkout.apply_coupon#tax")).toBe(false);
+  });
+
+  test("a released slug with no marker left is not reported as missing", () => {
+    const text = jsonl(
+      event("checkout.apply_coupon#tax", "checkout.apply_coupon"),
+      release("checkout.apply_coupon#tax", "checkout.apply_coupon")
+    );
+    const { registry } = validateBindingsJsonl(text, YAML_ROWS);
+    const scan = scanFiles([{ file_path: "Sources/Tax.swift", contents: "func t() {}" }]);
+    const result = reconcileRegistryWithScan(registry, scan);
+    expect(result.missing).toEqual([]);
+    expect(result.unregistered).toEqual([]);
+  });
+});
+
 describe("append-only check (spec amendment 2, rules 9/10)", () => {
   test("appending new lines is allowed", () => {
     const old = ["a", "b"];

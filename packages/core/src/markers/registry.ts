@@ -1,18 +1,28 @@
 // Append-only binding registry: reader, validator, materializer (spec section 4).
 //
 // The registry (`.use-cases/bindings.jsonl`) is an append-only log of
-// `binding_registered` events (amendment 2). This module turns that JSONL text
-// into validated events and a materialized map, enforcing the spec 4.3
-// validation rules with precise, stable error codes. Everything here is pure:
+// `binding_registered` and `binding_released` events (amendment 2). This module
+// turns that JSONL text into validated events and a materialized map, enforcing
+// the spec 4.3 validation rules with precise, stable error codes.
+//
+// A slug's registration ENDS with a `binding_released` event rather than by
+// deleting a line, so append-only survives while a binding stays re-pointable.
+// Without a release event the only registration a slug can ever have is its
+// first, which strands three states with no way out: a marker sitting on the
+// wrong declaration (DUPLICATE_REGISTRATION on the way back in), a retired
+// behaviour, and a renamed or deleted row (REGISTRY_ROW_MISSING forever).
+// Everything here is pure:
 // callers pass the file text and the set of YAML row ids; no filesystem or git
 // access happens in this module (the git base-ref read lives in appendOnly.ts).
 import { validateBindingRegistryEvent } from "./validators.js";
 import { splitSlug } from "./markerLine.js";
 
+export type RegistryEventType = "binding_registered" | "binding_released";
+
 // One registry event (spec 4.2). Mirrors binding-registry-event.schema.json.
 export interface RegistryEvent {
   schema: string;
-  event_type: string;
+  event_type: RegistryEventType;
   event_id: string;
   created_at: string;
   created_by: { tool: string; command: string; version: string };
@@ -28,7 +38,8 @@ export const RegistryErrorCode = Object.freeze({
   SLUG_PREFIX_MISMATCH: "SLUG_PREFIX_MISMATCH",
   REGISTRY_ROW_MISSING: "REGISTRY_ROW_MISSING",
   DUPLICATE_REGISTRATION: "DUPLICATE_REGISTRATION",
-  SLUG_ROW_CONFLICT: "SLUG_ROW_CONFLICT"
+  SLUG_ROW_CONFLICT: "SLUG_ROW_CONFLICT",
+  RELEASE_WITHOUT_REGISTRATION: "RELEASE_WITHOUT_REGISTRATION"
 } as const);
 
 export type RegistryErrorCode = (typeof RegistryErrorCode)[keyof typeof RegistryErrorCode];
@@ -110,6 +121,9 @@ export function validateRegistryEvents(
   const events: RegistryEvent[] = [];
   const rowToSlugs = new Map<string, Set<string>>();
   const slugToRow = new Map<string, string>();
+  // Where each LIVE slug was registered, so the row-existence check can report a
+  // line number after the fold instead of during it (see below).
+  const registeredAtLine = new Map<string, number>();
 
   for (const { line, value } of read.lines) {
     // Rule 1-3: schema (covers event_type === "binding_registered" via const).
@@ -141,20 +155,41 @@ export function validateRegistryEvents(
       continue;
     }
 
-    // Rule 5: row_id must exist in YAML rows.
-    if (!yamlRowIds.has(row)) {
-      errors.push({
-        code: RegistryErrorCode.REGISTRY_ROW_MISSING,
-        line,
-        message: `row_id ${row} is not a known YAML row`,
-        binding_slug: slug,
-        row_id: row
-      });
+    // Rule 5 (row_id must exist in YAML rows) is NOT checked here: a row is
+    // allowed to leave the matrix once its bindings have been released, and that
+    // release is appended AFTER the registration line that names the row. Judging
+    // the line in isolation would keep a retired row failing forever. The check
+    // runs over the LIVE slugs after the fold instead.
+
+    // A release ends the slug's current registration. Releasing a slug that is
+    // not currently bound is a lie about the log's state, so it fails closed.
+    if (event.event_type === "binding_released") {
+      const boundRow = slugToRow.get(slug);
+      if (boundRow === undefined) {
+        errors.push({
+          code: RegistryErrorCode.RELEASE_WITHOUT_REGISTRATION,
+          line,
+          message: `binding_slug ${slug} is not currently registered, so it cannot be released`,
+          binding_slug: slug,
+          row_id: row
+        });
+        continue;
+      }
+      slugToRow.delete(slug);
+      registeredAtLine.delete(slug);
+      const slugs = rowToSlugs.get(boundRow);
+      if (slugs) {
+        slugs.delete(slug);
+        if (slugs.size === 0) {
+          rowToSlugs.delete(boundRow);
+        }
+      }
+      events.push(event);
       continue;
     }
 
     // Rules 6/8 + v1 simplification ("do not allow duplicate registration at
-    // all"): a slug may be registered exactly once. Re-registering to a
+    // all"): a slug may hold at most ONE live registration. Re-registering to a
     // different row is the more specific SLUG_ROW_CONFLICT.
     const existingRow = slugToRow.get(slug);
     if (existingRow !== undefined) {
@@ -170,7 +205,7 @@ export function validateRegistryEvents(
         errors.push({
           code: RegistryErrorCode.DUPLICATE_REGISTRATION,
           line,
-          message: `binding_slug ${slug} is already registered`,
+          message: `binding slug ${slug} is already registered; re-point it with \`uc rebind\` or release it with \`uc unbind\``,
           binding_slug: slug,
           row_id: row
         });
@@ -179,6 +214,7 @@ export function validateRegistryEvents(
     }
 
     slugToRow.set(slug, row);
+    registeredAtLine.set(slug, line);
     let slugs = rowToSlugs.get(row);
     if (!slugs) {
       slugs = new Set<string>();
@@ -186,6 +222,21 @@ export function validateRegistryEvents(
     }
     slugs.add(slug);
     events.push(event);
+  }
+
+  // Rule 5, over the live set: a slug still bound to a row the matrix no longer
+  // has is a dangling registration and stays an error. A released one is not.
+  for (const [slug, line] of registeredAtLine) {
+    const row = slugToRow.get(slug);
+    if (row !== undefined && !yamlRowIds.has(row)) {
+      errors.push({
+        code: RegistryErrorCode.REGISTRY_ROW_MISSING,
+        line,
+        message: `row_id ${row} is not a known YAML row`,
+        binding_slug: slug,
+        row_id: row
+      });
+    }
   }
 
   return {
@@ -210,6 +261,18 @@ export function materializeRegistry(events: ReadonlyArray<RegistryEvent>): Mater
   const rowToSlugs = new Map<string, Set<string>>();
   const slugToRow = new Map<string, string>();
   for (const event of events) {
+    if (event.event_type === "binding_released") {
+      const boundRow = slugToRow.get(event.binding_slug);
+      slugToRow.delete(event.binding_slug);
+      const released = boundRow === undefined ? undefined : rowToSlugs.get(boundRow);
+      if (released) {
+        released.delete(event.binding_slug);
+        if (released.size === 0) {
+          rowToSlugs.delete(boundRow as string);
+        }
+      }
+      continue;
+    }
     slugToRow.set(event.binding_slug, event.row_id);
     let slugs = rowToSlugs.get(event.row_id);
     if (!slugs) {

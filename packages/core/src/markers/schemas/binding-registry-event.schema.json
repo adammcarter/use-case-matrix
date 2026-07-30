@@ -15,7 +15,7 @@
   ],
   "properties": {
     "schema": { "const": "ucase-binding-registry-event-v1" },
-    "event_type": { "const": "binding_registered" },
+    "event_type": { "enum": ["binding_registered", "binding_released"] },
     "event_id": { "type": "string", "minLength": 1 },
     "created_at": { "type": "string", "minLength": 1 },
     "created_by": {
