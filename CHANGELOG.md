@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format is based on
 follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
 **pre-1.0 (beta) software**: anything MAY change before `1.0.0`.
 
-## Unreleased
+## 0.6.0 - 2026-07-30
 
 ### Upgrade note
 
@@ -64,7 +64,11 @@ follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
   lost row can reach the inference by two routes at once, and two copies of one
   candidate tripped the "ambiguous, say nothing" tie-break.
 
-## 0.5.6 - 2026-07-25
+## 0.5.6 - 2026-07-25 (never published)
+
+Tagged in the changelog but never released to npm — the fix below ships in
+0.6.0 instead. npm went 0.5.5 -> 0.6.0.
+
 
 - **The three agents actually install now.** `agents` in the Claude plugin
   manifest takes explicit file paths; 0.5.5 declared a directory, which the
