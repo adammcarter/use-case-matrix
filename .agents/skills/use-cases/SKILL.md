@@ -67,6 +67,25 @@ uc recover --repo <repo> --row <row-id>      # (or --all) -> back to VERIFIED_LO
 with an actionable diagnostic naming the failing row(s). Fix the code or the test,
 then re-run.
 
+## Move or end a binding
+
+`recover` re-verifies a binding; it does not re-point one. When the marker is on
+the wrong declaration — or the behaviour is retired — write the binding again:
+
+```sh
+# Move it (marker + registration together, same file or another one).
+uc rebind --repo <repo> --row <row-id> --file <path> --mode swift-func --line <n>
+
+# End it (retired behaviour; also step 1 of a rename).
+uc unbind --repo <repo> --row <row-id> --reason row_retired
+```
+
+Count `--line` / `--start-line`/`--end-line` as the file will read once the OLD
+marker is gone. A moved binding does **not** inherit the old one's proof: the row
+reads `STALE_LOCAL` until `uc verify --row <row-id>` runs again. Renaming a row is
+`uc unbind` the old id, then `uc bind --register-existing` the new one — never a
+hand-edit of `bindings.jsonl`.
+
 ## Opt-in: signing for release / audit (FRESH)
 
 Reach for keys only when you need a cryptographically-signed release gate. This is

@@ -26,7 +26,8 @@ stages a demo from it, and `use-cases-demo` performs that demo for the user.
   uc scan --json                expect local_status: VERIFIED_LOCAL
         │
         ├─ VERIFIED_LOCAL ──► done
-        └─ drifted ────────► uc recover --row <id>   (or --all) ──► back to verify
+        ├─ drifted ────────► uc recover --row <id>   (or --all) ──► back to verify
+        └─ bound to the wrong code ─► uc rebind --row <id> --file <path> ──► back to verify
 ```
 
 Do not stop at `uc verify`. `uc scan --json` is the gate, and `VERIFIED_LOCAL` is
@@ -66,11 +67,24 @@ is a decision.
   that checks it — the binding tracks drift in the implementation.
 - **Never edit the ledgers by hand.** `bindings.jsonl`, `proofs.jsonl`, and
   `verification-results.jsonl` are append-only and tool-owned. Hand-editing them
-  breaks the append-only check and destroys the trust chain.
+  breaks the append-only check and destroys the trust chain. You never need to:
+  `uc rebind` moves a binding and `uc unbind` ends one.
 - **A drifted row is information, not an obstacle.** It means the code moved.
   `uc recover` re-anchors it; it does not paper over it. If recovery cannot
   re-anchor a row, the behaviour genuinely changed — update the row's *content*,
   do not force the marker back.
+- **A marker on the wrong declaration is the worst row you can leave behind.** It
+  reads as proven from every angle `uc` reports on, while the code it names
+  cannot fail when the claim does. When you find one, move it with
+  `uc rebind --row <id> --file <path> --mode <mode> …` — counting lines as the
+  file will read once the OLD marker is gone — then verify again. The row reads
+  `STALE_LOCAL` until you do, because a moved binding is a different claim and
+  does not inherit the old one's proof.
+- **A retired behaviour gets released, not abandoned.** `uc unbind --row <id>
+  --reason <why>` ends the binding, which is also the first step when a row is
+  renamed (`uc unbind` the old id, then `uc bind --register-existing` the new
+  one). A row deleted from the matrix while still bound leaves the workspace
+  failing on `REGISTRY_ROW_MISSING`.
 - **Never mutate a row, a verifier, or an input to turn a red scan green.** If
   scan stays red, that is the finding. Surface it with the JSON.
 - **Never claim user approval or sign-off.** You cannot grant it and neither can
