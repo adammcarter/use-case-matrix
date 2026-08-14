@@ -6,7 +6,7 @@ import { canonicalJson } from "../markers/canonicalJson.js";
 import { redactSecrets } from "../redact.js";
 import { UseCasesPluginError } from "../errors.js";
 import type { ResolvedWorkspaceContext } from "../roots.js";
-import type { EvidenceAppendResultData, EvidenceEvent, EvidenceKind, EvidenceResult, EvidenceTarget } from "./types.js";
+import type { EvidenceAppendResultData, EvidenceEvent, EvidenceKind, EvidenceObservation, EvidenceResult, EvidenceTarget } from "./types.js";
 import { evidenceRelativePath, evidenceRoot } from "./jsonlLedger.js";
 import { replayEvidence } from "./replayEvidence.js";
 
@@ -19,6 +19,11 @@ export type AppendEvidenceEventOptions = {
   summary: string;
   actorType: "user" | "agent" | "script" | "system";
   hostSurface: EvidenceEvent["host_surface"];
+  // How the observation was captured. Omitted, it is derived from actorType as
+  // before. Supplied, it is what a PERFORMED RUN needs: the argv the tool
+  // actually spawned, which nothing but the tool can honestly write and which
+  // `collectPerformedRuns` requires before counting a record as a real run.
+  method?: EvidenceObservation["method"];
 };
 
 export type VoidEvidenceEventOptions = {
@@ -193,7 +198,9 @@ function recordedEventFromOptions(
       result: options.result,
       summary: options.summary,
       producer: { type: options.actorType },
-      method: { type: options.actorType === "script" ? "structured_command" : "reported" },
+      method: options.method ?? {
+        type: options.actorType === "script" ? "structured_command" : "reported"
+      },
       evidence_kind: options.kind,
       use_case_ids: [options.target.use_case_id],
       verifier: { type: options.actorType === "system" ? "agent" : options.actorType },

@@ -99,6 +99,7 @@ interface ScanData {
       total: number;
       claimable: boolean;
       statement: string;
+      basis?: string;
     };
     integrity_errors?: IntegrityError[];
     rows: FreshnessRow[];
@@ -161,6 +162,12 @@ function renderScan(data: ScanData): string[] {
         ? `✓ acceptance: ${claim.statement}`
         : `⚠ acceptance: ${claim.statement} — do NOT claim acceptance`
     );
+    // WHERE that number came from. A bare "285 of 297 verified" cannot be
+    // argued with: it does not say whether 285 behaviours were demonstrated or
+    // 285 unit filters were spawned. This line does, so a reader can disagree.
+    if (claim.basis) {
+      lines.push(`  on the evidence of: ${claim.basis}`);
+    }
   }
   lines.push("");
 

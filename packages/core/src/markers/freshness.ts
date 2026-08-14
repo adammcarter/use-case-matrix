@@ -136,6 +136,13 @@ export interface DeriveFreshnessInput {
   // `local_status` per row. Omitted => no `local_status` is emitted (existing
   // callers are byte-identical). Never affects the signed `status`.
   local_results?: ReadonlyArray<LocalVerificationResult>;
+  // OPTIONAL performed runs, distilled from the OBSERVATION ledger
+  // (`evidence/by-id/**`) by collectPerformedRuns: rows the tool itself drove a
+  // command against, still current for the row. The acceptance claim ignored
+  // that ledger entirely, which is why genuinely driving a behaviour moved the
+  // number by zero. Omitted => no row reports `performed_run` (existing callers
+  // are byte-identical). Never affects the signed `status`.
+  performed_runs?: ReadonlyArray<{ row_id: string; argv?: string[] }>;
   // Injected so the core stays pure and deterministic (no Date.now).
   generated_at: string;
   product_root?: string;
@@ -212,6 +219,9 @@ export interface FreshnessRowOut {
   // never changes the headline `status`.
   local_status?: LocalStatus | null;
   local_reason?: string | null;
+  // Is this row backed by a run the tool drove against the product? Present only
+  // when the caller supplied `performed_runs`. Additive: never changes `status`.
+  performed_run?: boolean;
   // For a variant family only: the per-variant keyless local status breakdown, in
   // stable key order. The family's own `local_status` is VERIFIED_LOCAL iff every
   // entry here is VERIFIED_LOCAL. Additive/optional — absent for ordinary rows.
@@ -237,6 +247,10 @@ export interface FreshnessSummary {
   // row was verified and drifted, an unattested row was never verified here at
   // all — whatever its ledger line says.
   unattested_local: number;
+  // Rows backed by a run the tool drove against the product. Counted separately
+  // from the local verifier axis on purpose: a spawned unit-test filter and a
+  // driven journey are different evidence, and one must never read as the other.
+  performed_run: number;
 }
 
 // The acceptance conclusion, stated outright.
@@ -247,11 +261,29 @@ export interface FreshnessSummary {
 // `guard_ok` does not: how many behaviours are actually proven, and whether
 // acceptance can honestly be claimed. Agents quote conclusions; give them a true one.
 export interface AcceptanceClaim {
-  // Rows proven by EITHER tier: a signed FRESH proof, or a current VERIFIED_LOCAL run.
+  // Rows proven by ANY tier: a signed FRESH proof, a current attested local
+  // verifier run, or a performed run driven against the product.
   proven: number;
   total: number;
   claimable: boolean;
   statement: string;
+  // The decomposed claim, in words: "0 signed proof, 243 local verifier run,
+  // 0 performed run". `statement` keeps its historic wording (the upgrade
+  // contract forbids changing an observable value); this is the sentence that
+  // can actually be argued with, and it is what the human view prints.
+  basis: string;
+  // WHERE the `proven` count comes from, each row counted once at its strongest
+  // tier. A bare total is unfalsifiable — it cannot say whether 285 behaviours
+  // were demonstrated or 285 unit filters were spawned. This can.
+  by_evidence: {
+    signed_proof: number;
+    local_run: number;
+    performed_run: number;
+  };
+  // Rows whose only local evidence carries no valid run attestation. Named in
+  // the claim rather than quietly excluded, because "nothing was verified here"
+  // and "verification exists but was not run here" need different actions.
+  unattested: number;
 }
 
 export interface FreshnessStatus {
@@ -791,6 +823,8 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
 
   // Unsigned local verification results grouped by row (keyless tier). Only
   // consulted when the caller supplied them; omission leaves local_status absent.
+  const performedRunsProvided = input.performed_runs !== undefined;
+  const performedRunRows = new Set((input.performed_runs ?? []).map((run) => run.row_id));
   const localResultsProvided = input.local_results !== undefined;
   const localResultsByRow = new Map<string, LocalVerificationResult[]>();
   for (const result of input.local_results ?? []) {
@@ -828,11 +862,16 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
     verified_local: 0,
     stale_local: 0,
     unverified_local: 0,
-    unattested_local: 0
+    unattested_local: 0,
+    performed_run: 0
   };
-  // A row is PROVEN if either tier vouches for it: a signed FRESH proof, or a
-  // current passing local run. This is what acceptance is actually claimed on.
+  // A row is PROVEN if any tier vouches for it: a signed FRESH proof, a current
+  // attested local verifier run, or a run the tool drove against the product.
+  // This is what acceptance is actually claimed on. Each proven row is also
+  // tallied ONCE against its strongest tier, so the claim can say where it came
+  // from instead of presenting one undifferentiated number.
   let provenRows = 0;
+  const byEvidence = { signed_proof: 0, local_run: 0, performed_run: 0 };
 
   for (const rowId of [...rowIds].sort()) {
     const inputRow = rowById.get(rowId);
@@ -1119,6 +1158,15 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
       rowOut.local_status = localStatus;
       rowOut.local_reason = localReason ?? null;
     }
+    // A performed run only counts for a row that HAS code behind it. Driving a
+    // command and naming an unbound row supplies no binding, so it proves
+    // nothing about code — same rule the local tier already applies.
+    const bound =
+      status !== "INVALID" && status !== "UNBOUND" && currentRegistered.length > 0;
+    const performedRun = performedRunsProvided && bound && performedRunRows.has(rowId);
+    if (performedRunsProvided) {
+      rowOut.performed_run = performedRun;
+    }
     if (variantLocalStatus !== undefined) {
       rowOut.variant_local_status = variantLocalStatus;
     }
@@ -1164,9 +1212,21 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
         summary.unattested_local += 1;
         break;
     }
+    if (performedRun) {
+      summary.performed_run += 1;
+    }
 
-    if (status === "FRESH" || localStatus === "VERIFIED_LOCAL") {
+    if (status === "FRESH" || localStatus === "VERIFIED_LOCAL" || performedRun) {
       provenRows += 1;
+      // Strongest tier wins, so a row that is both verified and driven is not
+      // counted twice and the three numbers always sum to `proven`.
+      if (status === "FRESH") {
+        byEvidence.signed_proof += 1;
+      } else if (localStatus === "VERIFIED_LOCAL") {
+        byEvidence.local_run += 1;
+      } else {
+        byEvidence.performed_run += 1;
+      }
     }
   }
 
@@ -1182,9 +1242,25 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
   // policy/integrity error is outstanding. An UNBOUND row is never proven, so a
   // matrix with unbound rows can never claim acceptance — which is the point.
   const claimable = totalRows > 0 && provenRows === totalRows && guardOk;
+  // `statement` keeps its exact 0.5.5 wording. The repo's upgrade contract
+  // declares ZERO observable changes for a project that upgrades and carries on,
+  // and a prose field is still a field somebody parses.
   const statement = claimable
     ? `SUPPORTED — ${provenRows} of ${totalRows} behaviours verified`
     : `NOT_SUPPORTED — ${provenRows} of ${totalRows} behaviours verified`;
+  // `basis` is the new sentence, and it is the one worth quoting. `285 of 297
+  // verified` was true and unfalsifiable — it could not say whether 285
+  // behaviours had been demonstrated or 285 unit filters had been spawned. This
+  // says which, so a reader can disagree with it.
+  const parts = [
+    `${byEvidence.signed_proof} signed proof`,
+    `${byEvidence.local_run} local verifier run`,
+    `${byEvidence.performed_run} performed run`
+  ];
+  if (summary.unattested_local > 0) {
+    parts.push(`${summary.unattested_local} unattested (run \`uc verify\`)`);
+  }
+  const basis = parts.join(", ");
 //: @use-case:end lifecycle.signals.acceptance_claim_is_honest
 
   return {
@@ -1198,7 +1274,10 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
       proven: provenRows,
       total: totalRows,
       claimable,
-      statement
+      statement,
+      basis,
+      by_evidence: byEvidence,
+      unattested: summary.unattested_local
     },
     summary,
     integrity_errors: allIntegrity,

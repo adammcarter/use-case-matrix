@@ -30,6 +30,8 @@ import {
   type ScanResult
 } from "../scanner.js";
 import { readBaseRefFile, type GitRunner } from "../appendOnly.js";
+import { collectPerformedRuns, type PerformedRun } from "../../evidence/performedRuns.js";
+import { replayEvidence } from "../../evidence/replayEvidence.js";
 import {
   defaultRunKeyPath,
   readLocalRunKey,
@@ -133,6 +135,10 @@ export interface ScanCommandOptions {
   // Defaults to `~/.use-cases/run-key` / `$UC_RUN_KEY_FILE`. scan only ever READS
   // it — a read-only command cannot mint the thing it is meant to check.
   runKeyPath?: string;
+  // OPTIONAL override for the performed runs distilled from the observation
+  // ledger. Defaults to replaying `evidence/by-id/**` for this workspace. Tests
+  // inject a list; production never does.
+  performedRuns?: ReadonlyArray<PerformedRun>;
   // OPT-IN exit-code gate (0.1.0). When true, a REQUIRED row below the mode's
   // acceptable bar makes scan exit 1 (see evaluateScanGate). Off by default so
   // scan's exit code is backward-compatible (0 even for SUSPECT).
@@ -260,6 +266,29 @@ export function prepareScan(options: ScanCommandOptions): ScanPreparation {
   const localResults =
     resultsText == null ? [] : loadLocalVerificationResults(resultsText, runKey);
 
+  // The OBSERVATION ledger, which the acceptance claim used to ignore entirely —
+  // so five genuinely hand-driven records moved the number by zero while one
+  // typed line moved it by one. Only runs the tool itself executed are taken;
+  // `collectPerformedRuns` carries the rules and the reasons.
+  //
+  // Read-only and best-effort, exactly like the results ledger: a damaged or
+  // absent observation ledger yields no performed runs and never blocks a scan.
+  const performedRuns =
+    options.performedRuns ??
+    (() => {
+      try {
+        const semanticHashes = new Map(
+          loaded.snapshot.addressableUseCases.map((useCase) => [
+            useCase.value.id,
+            useCase.semanticHash
+          ])
+        );
+        return collectPerformedRuns(replayEvidence({ context: options.context }), semanticHashes);
+      } catch {
+        return [];
+      }
+    })();
+
   const status = deriveFreshness({
     rows: loaded.rows,
     registry: registryResult.registry,
@@ -270,6 +299,7 @@ export function prepareScan(options: ScanCommandOptions): ScanPreparation {
     product_root: options.productRoot,
     current_context_hashes: currentContextHashes,
     local_results: localResults,
+    performed_runs: performedRuns,
     global_integrity_errors: globalIntegrity,
     // OPTIONAL CI-neutral release-gate authority requirement from workspace
     // config (off by default). Only consulted in release mode by deriveFreshness.

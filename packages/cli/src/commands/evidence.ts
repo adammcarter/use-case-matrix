@@ -12,6 +12,59 @@ import {
   toEvidenceStatusResult
 } from "../runtime.js";
 import { workspaceFlags } from "./common.js";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+
+// The argv `--run` performs, taken from everything after a standalone `--`. A
+// leading `--` is already stripped by the entrypoint, so only a LATER one is a
+// separator here.
+function commandAfterSeparator(argv: string[]): string[] {
+  const index = argv.indexOf("--", 1);
+  return index === -1 ? [] : argv.slice(index + 1);
+}
+
+function sha256(input: string): string {
+  return `sha256:${createHash("sha256").update(input).digest("hex")}`;
+}
+
+type PerformedCommand =
+  | { kind: "error"; envelope: unknown }
+  | {
+      kind: "performed";
+      argv: string[];
+      exitCode: number;
+      stdoutSha256: string;
+      stderrSha256: string;
+    };
+
+// Spawn the command in the workspace root and distil what was observed. The exit
+// code and output digests are the observation; the argv is the part a
+// hand-written record cannot honestly produce.
+function runPerformedCommand(argv: string[], cwd: string): PerformedCommand {
+  const command = commandAfterSeparator(argv);
+  if (command.length === 0) {
+    return {
+      kind: "error",
+      envelope: errorEnvelope(
+        "evidence.record",
+        "evidence.run.command_required",
+        "--perform needs a command: `uc evidence record --use-case <id> --perform -- <cmd> [args...]`."
+      )
+    };
+  }
+  const [executable, ...args] = command;
+  const outcome = spawnSync(executable, args, { cwd, encoding: "utf8" });
+  // A command that could not start is a failed run, not a crashed CLI: the
+  // observation is "this did not work", and it is recorded as such.
+  const exitCode = typeof outcome.status === "number" ? outcome.status : 127;
+  return {
+    kind: "performed",
+    argv: command,
+    exitCode,
+    stdoutSha256: sha256(outcome.stdout ?? ""),
+    stderrSha256: sha256(outcome.stderr ?? "")
+  };
+}
 
 // Human-readable note for each derived assurance class. Ported verbatim from the
 // legacy `assuranceClassMessage` so the evidence.record info diagnostic stays
@@ -40,7 +93,12 @@ export const evidenceRecordCommand: CliCommand = {
     { key: "kind", name: "--kind", kind: "string", valueName: "<kind>", summary: "Evidence kind (defaults to manual_observation)." },
     { key: "result", name: "--result", kind: "string", valueName: "<result>", summary: "Evidence result (defaults to observed)." },
     { key: "summary", name: "--summary", kind: "string", valueName: "<text>", summary: "Human summary of the evidence." },
-    { key: "idempotencyKey", name: "--idempotency-key", kind: "string", valueName: "<key>", summary: "Idempotency key (defaults to a derived cli: key)." }
+    { key: "idempotencyKey", name: "--idempotency-key", kind: "string", valueName: "<key>", summary: "Idempotency key (defaults to a derived cli: key)." },
+    // NOT `--run`: `showcase --run <id>` already owns that name as a VALUE-bearing
+    // flag, so the shared unknown-flag allowlist would treat the `--` separator as
+    // its value and swallow the command. Caught by the acceptance test, not by
+    // reading the code.
+    { key: "perform", name: "--perform", kind: "boolean", summary: "PERFORM the behaviour: everything after `--` is spawned here, and the exit code + output digests become the evidence. Without it, a record is only your word for it." }
   ],
   handler: ({ argv, flags }) => {
     const context = resolveContextOrError(argv, "evidence.record");
@@ -62,19 +120,50 @@ export const evidenceRecordCommand: CliCommand = {
         exitCode: 2
       };
     }
-    const kind = (flags.kind as string | undefined) ?? "manual_observation";
-    const result = (flags.result as string | undefined) ?? "observed";
+    // --run: PERFORM the behaviour rather than assert it.
+    //
+    // Without this, every record the CLI could write was `actor_type: agent` ->
+    // `method: reported` -> assurance class `reported`, the ledger's own weakest
+    // tier. There was no way for the tool to record that it had SEEN something
+    // happen, which is why genuinely driving a behaviour could not move the
+    // acceptance claim: the strongest thing an agent could write was still only
+    // its word. Here the tool spawns the command itself, so the argv, the exit
+    // code and the output digests are observations rather than claims.
+    const performed =
+      flags.perform === true ? runPerformedCommand(argv, context.context.workspace_root) : null;
+    if (performed?.kind === "error") {
+      return { envelope: performed.envelope, exitCode: 2 };
+    }
+    const kind = (flags.kind as string | undefined) ?? (performed ? "command_result" : "manual_observation");
+    const result =
+      (flags.result as string | undefined) ??
+      (performed ? (performed.exitCode === 0 ? "pass" : "fail") : "observed");
+    const summary =
+      (flags.summary as string | undefined) ??
+      (performed
+        ? `Ran \`${performed.argv.join(" ")}\` for ${useCaseId}: exit ${performed.exitCode}, ` +
+          `stdout ${performed.stdoutSha256}, stderr ${performed.stderrSha256}.`
+        : `Recorded ${kind} evidence for ${useCaseId}.`);
     const append = appendEvidenceEvent({
       context: context.context,
-      idempotencyKey: (flags.idempotencyKey as string | undefined) ?? `cli:${useCaseId}:${kind}:${result}`,
+      idempotencyKey:
+        (flags.idempotencyKey as string | undefined) ??
+        (performed
+          ? `cli:run:${useCaseId}:${performed.stdoutSha256}:${performed.exitCode}`
+          : `cli:${useCaseId}:${kind}:${result}`),
       target: {
         use_case_id: useCaseId,
         use_case_semantic_hash: resolved.useCase.semanticHash
       },
       kind: kind as Parameters<typeof appendEvidenceEvent>[0]["kind"],
       result: result as Parameters<typeof appendEvidenceEvent>[0]["result"],
-      summary: (flags.summary as string | undefined) ?? `Recorded ${kind} evidence for ${useCaseId}.`,
-      actorType: "agent",
+      summary,
+      // `script` is what makes this a structured_command observation rather than
+      // a reported one, and the argv below is what proves a command existed.
+      actorType: performed ? "script" : "agent",
+      ...(performed
+        ? { method: { type: "structured_command" as const, executable: performed.argv[0], argv: performed.argv } }
+        : {}),
       hostSurface: "codex.cli"
     });
     // Surface the derived assurance class so the agent immediately sees how strong
@@ -84,8 +173,26 @@ export const evidenceRecordCommand: CliCommand = {
     const snapshot = replayEvidence({ context: context.context });
     const aggregate = snapshot.aggregates.find((item) => item.evidenceId === append.event.aggregate_id);
     const assuranceClass = (aggregate?.assurance as { class?: string } | undefined)?.class;
+    // What was actually run, said back. A performed run's whole value is that the
+    // tool saw it happen, so the reader gets the argv and the exit code rather
+    // than having to trust a summary line.
+    const runDiagnostics = performed
+      ? [
+          {
+            code: "evidence.performed_run",
+            severity: "info" as const,
+            message:
+              `Performed \`${performed.argv.join(" ")}\` and observed exit ${performed.exitCode}.`,
+            source_path: null,
+            json_pointer: null,
+            entity_id: null,
+            related_ids: []
+          }
+        ]
+      : [];
     const diagnostics = assuranceClass
       ? [
+          ...runDiagnostics,
           {
             code: "evidence.assurance_class",
             severity: "info" as const,
@@ -96,7 +203,7 @@ export const evidenceRecordCommand: CliCommand = {
             related_ids: []
           }
         ]
-      : [];
+      : runDiagnostics;
     return {
       envelope: createCliResult("evidence.record", toEvidenceAppendResult(append), {
         ok: true,
