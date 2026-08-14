@@ -27,6 +27,25 @@ export const VERIFIER_PRESET_IDS = [
 
 export type VerifierPresetId = (typeof VERIFIER_PRESET_IDS)[number];
 
+// The presets that are, by definition, a TEST SUITE — a runner invoked over a
+// test file or package. A row whose verifier expands from one of these is
+// verified by a unit suite, whatever its `evidence_kind` claims, and the tool
+// can say so mechanically.
+//
+// `make.target` and `command.generic` are NOT here: a make target or a
+// bring-your-own argv may genuinely drive the shipped product, and the tool
+// cannot tell from the outside. Silence there is honest; guessing would not be.
+const TEST_SUITE_PRESETS = new Set<VerifierPresetId>([
+  "js.vitest",
+  "js.npm-test",
+  "python.pytest",
+  "go.test"
+]);
+
+export function isTestSuitePreset(preset: string | undefined): boolean {
+  return preset !== undefined && TEST_SUITE_PRESETS.has(preset as VerifierPresetId);
+}
+
 export interface ExpandedPreset {
   kind: "script";
   command: string[];

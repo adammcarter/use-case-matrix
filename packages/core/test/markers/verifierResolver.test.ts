@@ -62,7 +62,10 @@ describe("resolveRowVerifiers", () => {
         kind: "script",
         evidence_kind: "test_result",
         command: ["npx", "--no-install", "vitest", "run", `tests/use-cases/${SLUG}.test.ts`],
-        inputs: [`tests/use-cases/${SLUG}.test.ts`]
+        inputs: [`tests/use-cases/${SLUG}.test.ts`],
+        // The preset id survives resolution so a caller can tell a NAMED TEST
+        // RUNNER from an arbitrary script. An explicit script has no `preset`.
+        preset: "js.vitest"
       }
     ]);
   });
@@ -113,6 +116,7 @@ describe("resolveRowVerifiers", () => {
         evidence_kind: "test_result",
         command: ["pytest", `tests/use_cases/${SLUG}_test.py`],
         inputs: [`tests/use_cases/${SLUG}_test.py`],
+        preset: "python.pytest",
         timeout_seconds: 120
       }
     ]);

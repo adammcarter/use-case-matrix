@@ -119,6 +119,28 @@ describe("collectPerformedRuns", () => {
     expect(rowsOf([claimed])).toEqual([]);
   });
 
+  // A record can NAME a command without the tool having executed it: a human who
+  // watched a command run and wrote down its argv lands at capture_method
+  // "observed", class `observed`. That is a real observation and it is still not
+  // a run the tool performed, so it does not prove the row.
+  //
+  // Isolating this mattered: a first version of the suite let the argv check
+  // stand in for the class check, and deleting the class check broke nothing.
+  test("an OBSERVED command — argv and all — is not a run the tool executed", () => {
+    const watched = aggregate({
+      assurance: {
+        origin: "user",
+        capture_method: "observed",
+        execution_method: "manual",
+        integrity: "caller_reported_digest",
+        reproducibility: "instructions",
+        result: "pass",
+        class: "observed"
+      }
+    });
+    expect(rowsOf([watched])).toEqual([]);
+  });
+
   test("a FAILING run does not count as proof the behaviour holds", () => {
     const failed = aggregate({
       effectiveObservation: observation({ result: "fail", verdict: "fail" })

@@ -18,7 +18,7 @@
 // verifier_id and deduped, and `{slug}` is substituted everywhere it appears in
 // command/inputs.
 
-import { expandPreset } from "./verifierPresets.js";
+import { expandPreset, type VerifierPresetId } from "./verifierPresets.js";
 
 // The convention id rows reference when they want "the workspace default verifier".
 // It carries no built-in command — it resolves ONLY via the workspace config's
@@ -60,6 +60,11 @@ export interface ResolvedVerifier {
   command: string[];
   inputs: string[];
   timeout_seconds?: number;
+  // The preset this verifier expanded from, when it came from one. Carried so a
+  // caller can tell a NAMED TEST RUNNER from an arbitrary script — which is the
+  // only mechanical way to know that a row declaring `evidence_kind: live_demo`
+  // is in fact pointing at a unit-suite filter. Absent for explicit scripts.
+  preset?: VerifierPresetId;
 }
 
 export interface BlockedVerifier {
@@ -163,7 +168,8 @@ function resolvePresetEntry(
     evidence_kind:
       typeof entry.evidence_kind === "string" ? entry.evidence_kind : DEFAULT_EVIDENCE_KIND,
     command: expansion.expansion.command,
-    inputs
+    inputs,
+    preset: expansion.preset
   };
   if (typeof entry.timeout_seconds === "number") {
     resolved.timeout_seconds = entry.timeout_seconds;

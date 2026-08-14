@@ -20,6 +20,7 @@ import type { FreshnessInputRow } from "../freshness.js";
 import { computeBindingSetHash } from "../bindingSetHash.js";
 import { computeRowVerificationContextHash } from "../verificationContextHash.js";
 import { resolveRowVerifiers, type ResolvedVerifier } from "../verifierResolver.js";
+import { isTestSuitePreset } from "../verifierPresets.js";
 import {
   computeRunAttestation,
   defaultRunKeyPath,
@@ -82,6 +83,20 @@ export interface VerificationResultRecord {
   // any record without a valid one to UNATTESTED_LOCAL, so a hand-typed line —
   // the measured defect this closes — proves nothing. See runAttestation.ts.
   run_attestation?: string;
+  // What the tool SAW run, as opposed to what the row DECLARED. Derived from the
+  // resolved verifier, never from `evidence_kind`:
+  //   "suite"   the verifier expanded from a named test runner — a unit suite
+  //   "command" an arbitrary script or make target; could be anything
+  //
+  // There is deliberately no "journey". `verify` spawns a process, and a process
+  // is not a demonstration; a demonstration is `uc evidence record --perform`,
+  // which records the argv it drove. Measured: 42 of 297 rows on a real repo
+  // resolved to a unit-suite filter while declaring `evidence_kind: live_demo`,
+  // and the ledger repeated the declaration without comment.
+  run_class?: "suite" | "command" | null;
+  // The row declared demonstration-grade evidence for something the tool can
+  // PROVE is a unit suite. The declaration is left untouched; this sits beside it.
+  evidence_kind_overclaimed?: boolean;
 }
 
 export interface VerifyCommandOptions {
@@ -132,6 +147,10 @@ export interface VerifyCommandResult {
   command: "verify";
   results: VerificationResultRecord[];
   out_path: string | null;
+  // Rows that declared demonstration-grade evidence (`live_demo`) for a verifier
+  // the tool can prove is a unit suite. Surfaced HERE, at the moment the record
+  // is written, because the row's author is the only person who can fix it.
+  overclaimed_rows?: string[];
   // Only populated by --dry-run. Empty on a real run.
   planned?: VerifyPlannedRow[];
   dry_run?: boolean;
@@ -329,6 +348,7 @@ export function runVerifyCommand(options: VerifyCommandOptions): VerifyCommandRe
 //: @use-case:end lifecycle.signals.verify_can_be_previewed
 
   const results: VerificationResultRecord[] = [];
+  const overclaimedRows: string[] = [];
   for (const rowId of targetRowIds) {
     const statusRow = prepared.status.rows.find((row) => row.row_id === rowId);
     const loadedRow = prepared.loaded.rows.find((row) => row.row_id === rowId);
@@ -440,12 +460,23 @@ export function runVerifyCommand(options: VerifyCommandOptions): VerifyCommandRe
       const firstFailure = runs.find((run) => run.outcome.exit_code !== 0 || run.outcome.timed_out);
       const decisive = firstFailure ?? runs[0];
 
+      // What the tool can SEE about the thing it just spawned. A named test
+      // runner is a suite by definition; anything else could be a real drive of
+      // the product, and the tool says nothing it cannot prove.
+      const runClass = isTestSuitePreset(decisive.verifier.preset) ? "suite" : "command";
+      const overclaimed = runClass === "suite" && decisive.verifier.evidence_kind === "live_demo";
+      if (overclaimed && !overclaimedRows.includes(rowId)) {
+        overclaimedRows.push(rowId);
+      }
       results.push({
         ...base,
         status: firstFailure ? "fail" : "pass",
+        // The DECLARED kind, preserved verbatim: the ledger corrects nobody's YAML.
         evidence_kind: decisive.verifier.evidence_kind,
         verifier_id: decisive.verifier.verifier_id,
         verifier_kind: decisive.verifier.kind,
+        run_class: runClass,
+        evidence_kind_overclaimed: overclaimed,
         exit_code: decisive.outcome.exit_code,
         stdout_sha256: sha256(decisive.outcome.stdout),
         stderr_sha256: sha256(decisive.outcome.stderr)
@@ -533,6 +564,7 @@ export function runVerifyCommand(options: VerifyCommandOptions): VerifyCommandRe
     exit_code: allPass ? 0 : 1,
     results,
     out_path: outPath,
+    overclaimed_rows: overclaimedRows,
     errors: verifyErrors
   });
 }
