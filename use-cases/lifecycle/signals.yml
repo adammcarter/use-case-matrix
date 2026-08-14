@@ -562,3 +562,207 @@ use_cases:
         title: A failing variant is named in the family breakdown
       - key: dry
         title: Dry-run previews the per-variant plan without spawning
+
+  - id: lifecycle.signals.local_results_are_attested
+    title: A verification result must prove a run wrote it
+    lifecycle: active
+    value_tier: critical
+    journey_role: golden
+    usage_frequency: common
+    tags:
+      - verify
+      - scan
+      - trust
+    source_refs:
+      - kind: file
+        path: packages/core/src/markers/runAttestation.ts
+      - kind: file
+        path: packages/core/src/markers/cli/verify.ts
+      - kind: file
+        path: packages/core/test/markers/verifyAttestsRuns.test.ts
+    actor: agent
+    intent: >-
+      Stop the keyless tier rewarding the forgeable path. Matching hashes are
+      computable by anything that can read the repo, so they never separated a
+      run from a text edit; only the tool that spawned the verifier holds the
+      machine-local key that attests a record.
+    preconditions:
+      - A bound row exists and its verifier can be resolved.
+    trigger: An agent runs `uc verify`, then `uc scan` reads the results ledger.
+    scenarios:
+      - id: lifecycle.signals.local_results_are_attested.real_run
+        kind: steps
+        steps:
+          - Run `uc verify` for a bound row so the verifier is actually spawned.
+          - Scan and read the row's local status.
+      - id: lifecycle.signals.local_results_are_attested.typed_line
+        kind: steps
+        steps:
+          - Hand-write a results line whose hashes all match the current code.
+          - Scan and read the row's local status and the acceptance claim.
+    observable_outcomes:
+      - A record `uc verify` wrote carries a run attestation and reads VERIFIED_LOCAL.
+      - A hand-written record with byte-perfect hashes reads UNATTESTED_LOCAL and is never counted as proven.
+      - Editing any field of an attested record — including flipping a failure to a pass — invalidates its attestation.
+      - A results ledger written on another machine reads unattested here, because someone else's run is not your evidence.
+      - "Scan never mints a key: a read-only command cannot attest anything."
+    host_applicability:
+      - host_surface: codex.cli
+        supported: true
+    verification_policy:
+      mode: requirements
+      verifiers:
+        script:
+          kind: script
+          evidence_kind: test_result
+          command:
+            - pnpm
+            - -s
+            - vitest
+            - run
+            - packages/core/test/markers/verifyAttestsRuns.test.ts
+          inputs:
+            - packages/core/test/markers/verifyAttestsRuns.test.ts
+      requirements:
+        - evidence_kind: test_result
+          required_verifiers:
+            - script
+          minimum_count: 1
+    approval_policy:
+      mode: none
+
+  - id: lifecycle.signals.performed_runs_count
+    title: A run the tool drove counts, and a self-reported one does not
+    lifecycle: active
+    value_tier: critical
+    journey_role: golden
+    usage_frequency: common
+    tags:
+      - evidence
+      - acceptance
+      - trust
+    source_refs:
+      - kind: file
+        path: packages/core/src/evidence/performedRuns.ts
+      - kind: file
+        path: packages/cli/src/commands/evidence.ts
+      - kind: file
+        path: packages/core/test/evidence/performedRuns.test.ts
+    actor: agent
+    intent: >-
+      Let the acceptance claim read the ledger of behaviour actually driven,
+      without letting it read prose. Before this the claim ignored
+      `evidence/by-id/**` entirely, so genuinely driving a behaviour moved no
+      number while a typed line did.
+    preconditions:
+      - A bound row exists in the matrix.
+    trigger: An agent runs `uc evidence record --perform -- <cmd>` and then `uc scan`.
+    scenarios:
+      - id: lifecycle.signals.performed_runs_count.driven
+        kind: steps
+        steps:
+          - Drive the behaviour with `uc evidence record --perform -- <cmd>`.
+          - Scan and read the acceptance claim.
+      - id: lifecycle.signals.performed_runs_count.reported
+        kind: steps
+        steps:
+          - Record a self-reported observation with no `--perform`.
+          - Scan and read the acceptance claim.
+    observable_outcomes:
+      - A tool-executed passing run proves its row, and the claim counts it under performed_run.
+      - A self-reported record proves nothing, whatever it says.
+      - A record naming a command it merely observed is not a run the tool executed and does not count.
+      - A failing run does not prove the behaviour holds.
+      - Editing the row invalidates the run that proved the old one, so this tier decays like every other.
+      - An unbound row cannot be proven by driving something and naming it.
+    host_applicability:
+      - host_surface: codex.cli
+        supported: true
+    verification_policy:
+      mode: requirements
+      verifiers:
+        script:
+          kind: script
+          evidence_kind: test_result
+          command:
+            - pnpm
+            - -s
+            - vitest
+            - run
+            - packages/core/test/evidence/performedRuns.test.ts
+          inputs:
+            - packages/core/test/evidence/performedRuns.test.ts
+      requirements:
+        - evidence_kind: test_result
+          required_verifiers:
+            - script
+          minimum_count: 1
+    approval_policy:
+      mode: none
+
+  - id: lifecycle.signals.run_class_is_derived
+    title: The ledger records what ran, not what the row called it
+    lifecycle: active
+    value_tier: core
+    journey_role: golden
+    usage_frequency: common
+    tags:
+      - verify
+      - evidence
+      - trust
+    source_refs:
+      - kind: file
+        path: packages/core/src/markers/verifierPresets.ts
+      - kind: file
+        path: packages/core/src/markers/cli/verify.ts
+      - kind: file
+        path: packages/core/test/markers/runClass.test.ts
+    actor: agent
+    intent: >-
+      Stop the ledger repeating a row's own claim about how strong its evidence
+      is. A named test runner is a unit suite by definition, and a row declaring
+      `live_demo` over one is overclaiming in a way the tool can prove.
+    preconditions:
+      - A bound row declares a verifier.
+    trigger: An agent runs `uc verify` for a row whose verifier resolves.
+    scenarios:
+      - id: lifecycle.signals.run_class_is_derived.suite
+        kind: steps
+        steps:
+          - Verify a row whose verifier expands from a named test-runner preset.
+          - Read the emitted record's run class.
+      - id: lifecycle.signals.run_class_is_derived.overclaim
+        kind: steps
+        steps:
+          - "Declare `evidence_kind: live_demo` over a test-runner preset."
+          - Verify the row and read what verify reports back.
+    observable_outcomes:
+      - A test-runner preset records run_class suite; anything else records command.
+      - Verify never mints a journey, because spawning a process is not a demonstration.
+      - A test-runner preset declaring live_demo is recorded as overclaimed and its row id is named back to the author.
+      - The declared evidence_kind is preserved verbatim — the ledger corrects nobody's YAML.
+      - A make target or an arbitrary script declaring live_demo is left alone, because the tool cannot prove that wrong.
+    host_applicability:
+      - host_surface: codex.cli
+        supported: true
+    verification_policy:
+      mode: requirements
+      verifiers:
+        script:
+          kind: script
+          evidence_kind: test_result
+          command:
+            - pnpm
+            - -s
+            - vitest
+            - run
+            - packages/core/test/markers/runClass.test.ts
+          inputs:
+            - packages/core/test/markers/runClass.test.ts
+      requirements:
+        - evidence_kind: test_result
+          required_verifiers:
+            - script
+          minimum_count: 1
+    approval_policy:
+      mode: none

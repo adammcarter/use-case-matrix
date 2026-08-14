@@ -5,6 +5,61 @@ All notable changes to this project are documented here. The format is based on
 follows [Semantic Versioning](https://semver.org) (see docs/release.md). This is
 **pre-1.0 (beta) software**: anything MAY change before `1.0.0`.
 
+## Unreleased
+
+### Upgrade note
+
+- **Re-run `uc verify --all` once after upgrading.** The keyless tier now
+  requires a *run attestation* on each verification result, and a ledger written
+  by an earlier version has none — those rows read `UNATTESTED_LOCAL` instead of
+  `VERIFIED_LOCAL`, and `uc scan --gate` in feature mode fails on a required one
+  until they are re-verified. One command fixes it, and
+  `tests/release/proof-survives-upgrade.test.ts` proves the cure on a real
+  0.5.5-built workspace. **Signed proofs are untouched**: a `FRESH` row stays
+  `FRESH`, and both upgrade-contract suites still assert zero observable change
+  across every other value the daily loop emits.
+
+### Fixed
+
+- **The acceptance claim rewarded the forgeable path and ignored the real one.**
+  Measured on a real repo: typing one fake line into
+  `.use-cases/verification-results.jsonl` moved the claim from 285 to 286 with
+  nothing executed, while five genuinely hand-driven evidence records moved it by
+  zero. `scan` trusted any line whose hashes matched the current code — hashes
+  anything that can read the repo can compute — and never read the observation
+  ledger at all.
+
+### Added
+
+- **Run attestation.** Every record `uc verify` writes carries an HMAC keyed by a
+  machine-local secret (`~/.use-cases/run-key`, or `$UC_RUN_KEY_FILE`), minted on
+  first use and never stored in the repo. A record without a valid one reads
+  `UNATTESTED_LOCAL` and is never counted as proven. Not the signing tier: no CI,
+  no keyring, nothing to configure — and tamper-*evident* rather than
+  tamper-proof, which is the honest bound of a keyless local tier.
+- **`uc evidence record --perform -- <cmd>`.** The tool spawns the command
+  itself and records the argv, exit code and output digests, so the ledger can
+  hold an *observation* rather than an agent's word. Previously every record the
+  CLI could write was the weakest tier, which is why driving a behaviour could
+  not honestly move any number.
+- **`acceptance_claim.by_evidence` and `.basis`.** The claim counts each row once
+  at its strongest tier — `signed_proof`, `local_run`, `performed_run` — and says
+  so in words under the headline. "285 of 297 verified" could not distinguish 285
+  demonstrations from 285 unit filters; this can. `statement` keeps its exact
+  historic wording, so nothing an existing consumer parses moves.
+- **`run_class` on each verification result**, derived from the verifier that ran
+  rather than from what the row declared: `suite` for a named test runner,
+  `command` otherwise, and never `journey` — spawning a process is not a
+  demonstration. A row declaring `evidence_kind: live_demo` over a named test
+  runner is recorded as `evidence_kind_overclaimed` and named back to its author
+  by `verify`. Measured: 42 of 297 rows on one repo did exactly that.
+
+### Fixed (while here)
+
+- `parseFlags` and the unknown-flag allowlist now stop at `--`, so a spawned
+  command's own flags are never read as `uc`'s. A payload containing `--out`
+  would previously have redirected a ledger write.
+
 ## 0.6.0 - 2026-07-30
 
 ### Upgrade note

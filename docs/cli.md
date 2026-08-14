@@ -40,7 +40,17 @@ All commands use JSON envelopes with `schema_version`, `protocol_version`,
 ## Evidence
 
 - `evidence record --repo <path> --use-case <id> --kind <kind> --result <result> --json`
-  appends one evidence event.
+  appends one evidence event. **This is your word for it** — the ledger grades a
+  self-reported observation its weakest tier (`reported`), and the acceptance
+  claim does not count it.
+- `evidence record --repo <path> --use-case <id> --perform -- <cmd> [args...] --json`
+  **performs** the behaviour instead of asserting it: `uc` spawns the command
+  itself and records the argv it ran, the exit code, and the output digests. That
+  lands as assurance class `reproducible`, and `uc scan` counts it as a
+  **performed run** — a row proven by driving the product rather than by a
+  spawned unit filter. A failing command is recorded as a failing run and proves
+  nothing. Everything after `--` belongs to the spawned command, so its own flags
+  are never read as `uc`'s.
 - `evidence status --repo <path> --json` replays append-only JSONL history.
 - `evidence void --repo <path> --evidence <id> --expected-head <event-id> --reason <text> --json`
   records a correction event without deleting history.
