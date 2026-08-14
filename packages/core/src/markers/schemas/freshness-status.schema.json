@@ -77,7 +77,7 @@
         "local_status": {
           "oneOf": [
             { "type": "null" },
-            { "enum": ["VERIFIED_LOCAL", "STALE_LOCAL", "UNVERIFIED_LOCAL"] }
+            { "enum": ["VERIFIED_LOCAL", "STALE_LOCAL", "UNATTESTED_LOCAL", "UNVERIFIED_LOCAL"] }
           ]
         },
         "local_reason": { "type": ["string", "null"] },
@@ -139,7 +139,8 @@
         "policy_blocked": { "type": "integer", "minimum": 0 },
         "verified_local": { "type": "integer", "minimum": 0 },
         "stale_local": { "type": "integer", "minimum": 0 },
-        "unverified_local": { "type": "integer", "minimum": 0 }
+        "unverified_local": { "type": "integer", "minimum": 0 },
+        "unattested_local": { "type": "integer", "minimum": 0 }
       }
     },
     "integrity_errors": { "type": "array", "items": { "type": "object" } },

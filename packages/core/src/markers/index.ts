@@ -33,6 +33,9 @@ export * from "./keyring.js";
 export * from "./keygen.js";
 // Public-v1: CI-neutral provenance authority detection.
 export * from "./ciAuthority.js";
+// Keyless run attestation: proof that a verify RUN, not a text editor, wrote a
+// verification-result record.
+export * from "./runAttestation.js";
 // Phase 6: freshness state machine (status derivation + policy gate).
 export * from "./freshness.js";
 // Phase 7: CLI command cores (bind / scan / prove / validate-ledger).

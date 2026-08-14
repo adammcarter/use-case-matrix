@@ -36,9 +36,16 @@ export type PolicyMode = "feature" | "release" | "custom";
 //                    analogue of FRESH.
 //   STALE_LOCAL      a result exists but its context/binding set no longer match,
 //                    or the recorded result was a failure — the analogue of SUSPECT.
+//   UNATTESTED_LOCAL a result exists but carries no proof that a RUN wrote it —
+//                    a hand-written line, or one from another machine. Never
+//                    counted as proven; see runAttestation.ts for why.
 //   UNVERIFIED_LOCAL bound row with no local result yet.
 //   null             UNBOUND / INVALID (nothing to locally verify).
-export type LocalStatus = "VERIFIED_LOCAL" | "STALE_LOCAL" | "UNVERIFIED_LOCAL";
+export type LocalStatus =
+  | "VERIFIED_LOCAL"
+  | "STALE_LOCAL"
+  | "UNATTESTED_LOCAL"
+  | "UNVERIFIED_LOCAL";
 
 // One row's UNSIGNED verification result, distilled from the results ledger
 // (`ucase-verification-result-v1`). `context_hash` mirrors the record's
@@ -49,6 +56,13 @@ export interface LocalVerificationResult {
   context_hash: string;
   binding_set_hash: string;
   passed: boolean;
+  // Did this record carry a valid run attestation (proof that `uc verify` on
+  // this machine wrote it, having spawned the verifier to do so)? `false` means
+  // the line was hand-written or came from elsewhere, and it proves nothing.
+  //
+  // `undefined` means the CALLER does not model attestation — pure unit callers
+  // only. `scan`, the sole production caller, always sets it explicitly.
+  attested?: boolean;
 }
 
 // A loaded use-case row. `computeRowHash` hashes the whole object (Hrow), so any
@@ -218,6 +232,11 @@ export interface FreshnessSummary {
   verified_local: number;
   stale_local: number;
   unverified_local: number;
+  // Rows whose only local results carry no valid run attestation. Surfaced
+  // rather than folded into stale_local, because the cure is different: a stale
+  // row was verified and drifted, an unattested row was never verified here at
+  // all — whatever its ledger line says.
+  unattested_local: number;
 }
 
 // The acceptance conclusion, stated outright.
@@ -598,12 +617,25 @@ function evaluatePolicyBlock(
 // match => VERIFIED_LOCAL; a result that exists but no longer matches (or was a
 // failure) => STALE_LOCAL; no result => UNVERIFIED_LOCAL. Pure + side-effect free.
 function deriveLocalStatus(
-  results: LocalVerificationResult[],
+  allResults: LocalVerificationResult[],
   currentContextHash: string | undefined,
   hBind: string
 ): { local_status: LocalStatus; local_reason: string | null } {
-  if (results.length === 0) {
+  if (allResults.length === 0) {
     return { local_status: "UNVERIFIED_LOCAL", local_reason: null };
+  }
+  // ATTESTATION FIRST, and it is a filter rather than a verdict. A record with
+  // no proof that a run wrote it tells us nothing — not that the row passed, and
+  // not that it failed — so it is dropped before any other question is asked. A
+  // forged line sitting beside an honest one must not poison the honest one.
+  const results = allResults.filter((result) => result.attested !== false);
+  if (results.length === 0) {
+    return {
+      local_status: "UNATTESTED_LOCAL",
+      local_reason:
+        "a verification result exists for this row but carries no valid run attestation, " +
+        "so nothing proves a verifier was ever run for it here; run `uc verify` to record a real one"
+    };
   }
   const passing = results.some(
     (result) =>
@@ -795,7 +827,8 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
     policy_blocked: 0,
     verified_local: 0,
     stale_local: 0,
-    unverified_local: 0
+    unverified_local: 0,
+    unattested_local: 0
   };
   // A row is PROVEN if either tier vouches for it: a signed FRESH proof, or a
   // current passing local run. This is what acceptance is actually claimed on.
@@ -1027,7 +1060,16 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
         variantLocalStatus = breakdown;
         const allVerified = breakdown.every((entry) => entry.local_status === "VERIFIED_LOCAL");
         const anyStale = breakdown.some((entry) => entry.local_status === "STALE_LOCAL");
-        localStatus = allVerified ? "VERIFIED_LOCAL" : anyStale ? "STALE_LOCAL" : "UNVERIFIED_LOCAL";
+        // Unattested outranks stale in the family roll-up: a family carrying a
+        // forged variant record has a worse problem than a drifted one.
+        const anyUnattested = breakdown.some((entry) => entry.local_status === "UNATTESTED_LOCAL");
+        localStatus = allVerified
+          ? "VERIFIED_LOCAL"
+          : anyUnattested
+            ? "UNATTESTED_LOCAL"
+            : anyStale
+              ? "STALE_LOCAL"
+              : "UNVERIFIED_LOCAL";
         const failing = breakdown.filter((entry) => entry.local_status !== "VERIFIED_LOCAL");
         localReason = allVerified
           ? null
@@ -1117,6 +1159,9 @@ export function deriveFreshness(input: DeriveFreshnessInput): FreshnessStatus {
         break;
       case "UNVERIFIED_LOCAL":
         summary.unverified_local += 1;
+        break;
+      case "UNATTESTED_LOCAL":
+        summary.unattested_local += 1;
         break;
     }
 

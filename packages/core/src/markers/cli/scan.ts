@@ -30,6 +30,11 @@ import {
   type ScanResult
 } from "../scanner.js";
 import { readBaseRefFile, type GitRunner } from "../appendOnly.js";
+import {
+  defaultRunKeyPath,
+  readLocalRunKey,
+  verifyRunAttestation
+} from "../runAttestation.js";
 import { computeRowVerificationContextHash } from "../verificationContextHash.js";
 import { join } from "node:path";
 import { nodeMarkerFs, type MarkerFs } from "./io.js";
@@ -49,7 +54,13 @@ export const DEFAULT_VERIFICATION_RESULTS_FILENAME = "verification-results.jsonl
 // `ucase-verification-result-v1` records) into the minimal shape freshness's
 // keyless tier consumes. Unreadable/blank/malformed content yields an empty list
 // (the keyless signal is best-effort and NEVER blocks the read-only scan).
-function loadLocalVerificationResults(text: string): LocalVerificationResult[] {
+function loadLocalVerificationResults(
+  text: string,
+  // The machine-local run key, or null when this machine has never run `verify`.
+  // A null key attests nothing, which is the correct reading on a fresh clone:
+  // someone else's committed results ledger is not evidence that anything ran HERE.
+  runKey: string | null
+): LocalVerificationResult[] {
   const results: LocalVerificationResult[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.trim();
@@ -82,7 +93,11 @@ function loadLocalVerificationResults(text: string): LocalVerificationResult[] {
       row_id: rowId,
       context_hash: contextHash,
       binding_set_hash: bindingSetHash,
-      passed: status === "pass"
+      passed: status === "pass",
+      // The whole point: matching hashes are NOT evidence a run happened, because
+      // anything that can read the current code can compute them. The attestation
+      // is what a text editor cannot produce.
+      attested: verifyRunAttestation(value, runKey)
     });
   }
   return results;
@@ -114,6 +129,10 @@ export interface ScanCommandOptions {
   // that feeds the keyless VERIFIED_LOCAL tier. Defaults to
   // <data_root>/.use-cases/verification-results.jsonl. Absent file => no local tier.
   resultsPath?: string;
+  // Where the machine-local run key lives (see markers/runAttestation.ts).
+  // Defaults to `~/.use-cases/run-key` / `$UC_RUN_KEY_FILE`. scan only ever READS
+  // it — a read-only command cannot mint the thing it is meant to check.
+  runKeyPath?: string;
   // OPT-IN exit-code gate (0.1.0). When true, a REQUIRED row below the mode's
   // acceptable bar makes scan exit 1 (see evaluateScanGate). Off by default so
   // scan's exit code is backward-compatible (0 even for SUSPECT).
@@ -237,8 +256,9 @@ export function prepareScan(options: ScanCommandOptions): ScanPreparation {
     options.resultsPath ??
     join(options.context.data_root, ".use-cases", DEFAULT_VERIFICATION_RESULTS_FILENAME);
   const resultsText = fs.readText(resultsPath);
+  const runKey = readLocalRunKey(options.runKeyPath ?? defaultRunKeyPath(), fs);
   const localResults =
-    resultsText == null ? [] : loadLocalVerificationResults(resultsText);
+    resultsText == null ? [] : loadLocalVerificationResults(resultsText, runKey);
 
   const status = deriveFreshness({
     rows: loaded.rows,

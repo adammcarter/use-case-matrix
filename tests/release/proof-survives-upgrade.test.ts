@@ -35,11 +35,17 @@ let workspace: string;
 let rows: Row[];
 let exitCode: number | null;
 
+// The machine-local run key must never be the developer's real one, so every
+// spawn here points at a throwaway path inside the copied workspace.
+function runKeyEnv() {
+  return { ...process.env, UC_RUN_KEY_FILE: join(workspace, "machine", "run-key") };
+}
+
 function scan(dir: string, extra: string[] = []) {
   return spawnSync(
     "node",
     [cliBin, "scan", "--repo", dir, "--public-key", join(dir, "trusted-public-key.pem"), "--json", ...extra],
-    { encoding: "utf8" }
+    { encoding: "utf8", env: runKeyEnv() }
   );
 }
 
@@ -91,10 +97,38 @@ describe("a workspace proven by 0.5.5 still reads correctly", () => {
     expect(row("checkout.apply_coupon").status).toBe("FRESH");
   });
 
-  test("the unsigned row is still UNPROVEN / VERIFIED_LOCAL, not silently promoted", () => {
+  // THE ONE DELIBERATE DEGRADATION IN THE KEYLESS TIER, pinned here rather than
+  // left for an adopter to discover.
+  //
+  // 0.5.5 wrote its verification-results ledger with no run attestation, because
+  // there was none to write: any line whose hashes matched was accepted, which is
+  // exactly why typing a line moved the acceptance claim. Under this build such a
+  // record reads UNATTESTED_LOCAL — it is not silently promoted to verified, and
+  // equally it is not silently discarded: the row says what is wrong and the next
+  // test proves the cure is one command.
+  //
+  // The SIGNED tier is untouched: the FRESH row above is still FRESH.
+  test("an unattested 0.5.5 result is neither promoted nor believed", () => {
     const unsigned = row("checkout.refund_order");
     expect(unsigned.status).toBe("UNPROVEN");
-    expect(unsigned.local_status).toBe("VERIFIED_LOCAL");
+    expect(unsigned.local_status).toBe("UNATTESTED_LOCAL");
+  });
+
+  test("re-running verify restores VERIFIED_LOCAL — the upgrade cure is one command", () => {
+    const verified = spawnSync(
+      "node",
+      [cliBin, "verify", "--repo", workspace, "--row", "checkout.refund_order", "--json"],
+      { encoding: "utf8", env: runKeyEnv() }
+    );
+    expect(verified.status).toBe(0);
+
+    const rescanned = JSON.parse(scan(workspace).stdout) as {
+      data: { status: { rows: Row[] } };
+    };
+    const unsigned = rescanned.data.status.rows.find(
+      (entry) => entry.row_id === "checkout.refund_order"
+    );
+    expect(unsigned?.local_status).toBe("VERIFIED_LOCAL");
   });
 
   test("every hash the proof binds to is bit-identical to what 0.5.5 recorded", () => {

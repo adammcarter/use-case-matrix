@@ -20,6 +20,11 @@ import type { FreshnessInputRow } from "../freshness.js";
 import { computeBindingSetHash } from "../bindingSetHash.js";
 import { computeRowVerificationContextHash } from "../verificationContextHash.js";
 import { resolveRowVerifiers, type ResolvedVerifier } from "../verifierResolver.js";
+import {
+  computeRunAttestation,
+  defaultRunKeyPath,
+  resolveLocalRunKey
+} from "../runAttestation.js";
 import type { PublicKeyResolver } from "../proofSignature.js";
 import type { CurrentBindingRecord } from "../scanner.js";
 import type { GitRunner } from "../appendOnly.js";
@@ -72,6 +77,11 @@ export interface VerificationResultRecord {
   // Additive/optional — an ordinary row's record omits it, so existing ledgers and
   // older readers are unaffected.
   variant_key?: string;
+  // Proof that a RUN wrote this record: an HMAC over the record's own content,
+  // keyed by a secret held on this machine and never in the repo. `scan` demotes
+  // any record without a valid one to UNATTESTED_LOCAL, so a hand-typed line —
+  // the measured defect this closes — proves nothing. See runAttestation.ts.
+  run_attestation?: string;
 }
 
 export interface VerifyCommandOptions {
@@ -100,6 +110,10 @@ export interface VerifyCommandOptions {
   baseRef?: string;
   gitRunner?: GitRunner;
   repoCwd?: string;
+  // Where the machine-local run key lives. Defaults to `~/.use-cases/run-key`
+  // (or `$UC_RUN_KEY_FILE`). Injected by tests so a suite never mints a key into
+  // the real home directory.
+  runKeyPath?: string;
 }
 
 // What a --dry-run says it WOULD do for one row: nothing is run and nothing is
@@ -439,6 +453,26 @@ export function runVerifyCommand(options: VerifyCommandOptions): VerifyCommandRe
     }
   }
 //: @use-case:end lifecycle.signals.variant_fanout
+
+  // ATTEST what was actually run. Every record above describes a spawn this
+  // process performed (or a resolution it refused to spawn), and only this
+  // process holds the machine-local key — so the HMAC is the difference between
+  // a record of a run and a line someone typed. Applied to fail/blocked records
+  // too: `scan` must be able to tell "verified and failed" from "never verified
+  // here", and it can only do that if the failure is attested as well.
+  //
+  // Minted lazily: a run that produced no records never creates a key file.
+//: @use-case:lifecycle.signals.local_results_are_attested
+  if (results.length > 0) {
+    const runKey = resolveLocalRunKey(options.runKeyPath ?? defaultRunKeyPath(), fs);
+    for (const record of results) {
+      record.run_attestation = computeRunAttestation(
+        record as unknown as Record<string, unknown>,
+        runKey
+      );
+    }
+  }
+//: @use-case:end lifecycle.signals.local_results_are_attested
 
   // Write the results ledger (one JSONL line per row) if requested. This is an
   // unsigned per-run snapshot — NOT the append-only trusted evidence ledger.
